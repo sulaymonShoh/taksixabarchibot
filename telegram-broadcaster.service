@@ -1,0 +1,16 @@
+[Unit]
+Description=Dual-Engine Telegram Broadcaster
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# Update the WorkingDirectory to the absolute path of the project folder
+WorkingDirectory=/path/to/project
+# Update the ExecStart to the absolute path of the python interpreter and main script
+ExecStart=/path/to/project/.venv/bin/python -m src.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
