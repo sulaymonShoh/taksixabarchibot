@@ -1,9 +1,11 @@
 import os
+import contextlib
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramBadRequest
 
 from src import database as db
 from src.bot import keyboards as kb
@@ -17,6 +19,11 @@ router = Router()
 class BotStates(StatesGroup):
     waiting_for_message = State()
     waiting_for_custom_timing = State()
+
+async def safe_answer(call: CallbackQuery, text: str = None, show_alert: bool = False):
+    """Safely answer callback queries ignoring timeout/invalid query errors."""
+    with contextlib.suppress(TelegramBadRequest):
+        await call.answer(text=text, show_alert=show_alert)
 
 async def render_dashboard(message_or_call, state: FSMContext = None):
     if state:
@@ -59,7 +66,8 @@ async def render_dashboard(message_or_call, state: FSMContext = None):
     if isinstance(message_or_call, Message):
         await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
     else:
-        await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+        with contextlib.suppress(TelegramBadRequest):
+            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
 
 @router.message(CommandStart())
 @router.message(Command("menu"))
@@ -69,20 +77,21 @@ async def start_cmd(message: Message, state: FSMContext):
 @router.callback_query(F.data == "back_dashboard")
 async def back_dashboard_call(call: CallbackQuery, state: FSMContext):
     await render_dashboard(call, state)
+    await safe_answer(call)
 
 @router.callback_query(F.data == "toggle_state")
 async def toggle_state_call(call: CallbackQuery):
     is_running = await db.get_setting("is_running", False)
     await db.set_setting("is_running", not is_running)
     await render_dashboard(call)
-    await call.answer("Holat o'zgartirildi!")
+    await safe_answer(call, "Holat o'zgartirildi!")
 
 @router.callback_query(F.data == "toggle_cleanup")
 async def toggle_cleanup_call(call: CallbackQuery):
     auto_cleanup = await db.get_setting("auto_cleanup", False)
     await db.set_setting("auto_cleanup", not auto_cleanup)
     await render_dashboard(call)
-    await call.answer("Avto-tozalash sozlamasi o'zgartirildi!")
+    await safe_answer(call, "Avto-tozalash sozlamasi o'zgartirildi!")
 
 # Message Preview Handler
 @router.callback_query(F.data == "preview_message")
@@ -91,10 +100,10 @@ async def preview_message_call(call: CallbackQuery, bot: Bot):
     media_path = await db.get_setting("media_path", None)
     
     if not content and not media_path:
-        await call.answer("Xabar hali o'rnatilmagan! Avval 'Xabarni tahrirlash' tugmasini bosing.", show_alert=True)
+        await safe_answer(call, "Xabar hali o'rnatilmagan! Avval 'Xabarni tahrirlash' tugmasini bosing.", show_alert=True)
         return
         
-    await call.answer("Xabar namunasi tayyorlanmoqda...")
+    await safe_answer(call, "Xabar namunasi tayyorlanmoqda...")
     
     # Parse spintax to show a live variation
     sample_text = parse_spintax(content) if content else ""
@@ -117,13 +126,14 @@ async def preview_message_call(call: CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data == "adjust_timing")
 async def adjust_timing_call(call: CallbackQuery):
-    await call.message.edit_text(
-        "⏱ **Vaqt oralig'ini sozlash**\n\n"
-        "Guruhlarga xabar tarqatish doiralari (har bir to'liq aylanma) orasidagi kutish vaqtini tanlang:",
-        reply_markup=kb.timing_kb(),
-        parse_mode="Markdown"
-    )
-    await call.answer()
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(
+            "⏱ **Vaqt oralig'ini sozlash**\n\n"
+            "Guruhlarga xabar tarqatish doiralari (har bir to'liq aylanma) orasidagi kutish vaqtini tanlang:",
+            reply_markup=kb.timing_kb(),
+            parse_mode="Markdown"
+        )
+    await safe_answer(call)
 
 @router.callback_query(F.data.startswith("time_preset_"))
 async def time_preset_call(call: CallbackQuery):
@@ -144,19 +154,20 @@ async def time_preset_call(call: CallbackQuery):
     await db.set_setting("cycle_min", c_min)
     await db.set_setting("cycle_max", c_max)
     await render_dashboard(call)
-    await call.answer(f"Vaqt sozlandi: {label}")
+    await safe_answer(call, f"Vaqt sozlandi: {label}")
 
 @router.callback_query(F.data == "time_custom")
 async def time_custom_call(call: CallbackQuery, state: FSMContext):
-    await call.message.edit_text(
-        "✍️ **O'zingiz vaqt kiriting**\n\n"
-        "Minimal va maksimal kutish vaqtini soniyalarda probel bilan yuboring.\n"
-        "Masalan: `60 90` yoki `180 300`",
-        reply_markup=kb.back_kb(),
-        parse_mode="Markdown"
-    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(
+            "✍️ **O'zingiz vaqt kiriting**\n\n"
+            "Minimal va maksimal kutish vaqtini soniyalarda probel bilan yuboring.\n"
+            "Masalan: `60 90` yoki `180 300`",
+            reply_markup=kb.back_kb(),
+            parse_mode="Markdown"
+        )
     await state.set_state(BotStates.waiting_for_custom_timing)
-    await call.answer()
+    await safe_answer(call)
 
 @router.message(BotStates.waiting_for_custom_timing)
 async def process_custom_timing(message: Message, state: FSMContext):
@@ -179,16 +190,17 @@ async def process_custom_timing(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "edit_message")
 async def edit_message_call(call: CallbackQuery, state: FSMContext):
-    await call.message.edit_text(
-        "📝 **Tarqatiladigan xabarni tahrirlash**\n\n"
-        "Yangi matnni yuboring (Spintax variantlaridan foydalanishingiz mumkin, masalan: `{Salom|Assalomu alaykum}` va formatlash teglari).\n\n"
-        "Agar rasm yoki video qo'shmoqchi bo'lsangiz, uni izoh (caption) bilan birga to'g'ridan-to'g'ri botga yuboring.\n\n"
-        "_Eslatma: Yangi media yuborilsa, avvalgi media fayl yangilanadi._",
-        reply_markup=kb.back_kb(),
-        parse_mode="Markdown"
-    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(
+            "📝 **Tarqatiladigan xabarni tahrirlash**\n\n"
+            "Yangi matnni yuboring (Spintax variantlaridan foydalanishingiz mumkin, masalan: `{Salom|Assalomu alaykum}` va formatlash teglari).\n\n"
+            "Agar rasm yoki video qo'shmoqchi bo'lsangiz, uni izoh (caption) bilan birga to'g'ridan-to'g'ri botga yuboring.\n\n"
+            "_Eslatma: Yangi media yuborilsa, avvalgi media fayl yangilanadi._",
+            reply_markup=kb.back_kb(),
+            parse_mode="Markdown"
+        )
     await state.set_state(BotStates.waiting_for_message)
-    await call.answer()
+    await safe_answer(call)
 
 @router.message(BotStates.waiting_for_message)
 async def process_new_message(message: Message, state: FSMContext, bot: Bot):
@@ -234,10 +246,11 @@ async def process_new_message(message: Message, state: FSMContext, bot: Bot):
 async def manage_groups_call(call: CallbackQuery, bot: Bot):
     worker_client = getattr(bot, 'worker_client', None)
     if not worker_client:
-        await call.answer("Worker akkaunti ulanmagan.", show_alert=True)
+        await safe_answer(call, "Worker akkaunti ulanmagan.", show_alert=True)
         return
         
-    await call.message.edit_text("⏳ Guruhlar tekshirilmoqda, iltimos kuting...")
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text("⏳ Guruhlar tekshirilmoqda, iltimos kuting...")
     
     try:
         from telethon.tl.types import Channel, Chat
@@ -262,22 +275,26 @@ async def manage_groups_call(call: CallbackQuery, bot: Bot):
                     group_count += 1
                     
         groups = await db.get_all_groups()
-        await call.message.edit_text(
-            f"👥 **Guruhlarni Boshqarish**\n"
-            f"Jami {len(groups)} ta guruh topildi.\n"
-            "Xabar yuboriladigan guruhlarni belgilang (✅ - faol, ⬜️ - o'chirilgan):",
-            reply_markup=kb.paginated_groups_kb(groups, 0)
-        )
+        with contextlib.suppress(TelegramBadRequest):
+            await call.message.edit_text(
+                f"👥 **Guruhlarni Boshqarish**\n"
+                f"Jami {len(groups)} ta guruh topildi.\n"
+                "Xabar yuboriladigan guruhlarni belgilang (✅ - faol, ⬜️ - o'chirilgan):",
+                reply_markup=kb.paginated_groups_kb(groups, 0)
+            )
     except Exception as e:
         logger.error(f"Error scanning groups: {e}")
-        await call.message.edit_text("Guruhlarni yuklashda xatolik yuz berdi. Loglarni tekshiring.", reply_markup=kb.back_kb())
+        with contextlib.suppress(TelegramBadRequest):
+            await call.message.edit_text("Guruhlarni yuklashda xatolik yuz berdi. Loglarni tekshiring.", reply_markup=kb.back_kb())
+    await safe_answer(call)
 
 @router.callback_query(F.data.startswith("page_groups_"))
 async def page_groups_call(call: CallbackQuery):
     page = int(call.data.split("_")[2])
     groups = await db.get_all_groups()
-    await call.message.edit_reply_markup(reply_markup=kb.paginated_groups_kb(groups, page))
-    await call.answer()
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_reply_markup(reply_markup=kb.paginated_groups_kb(groups, page))
+    await safe_answer(call)
 
 @router.callback_query(F.data.startswith("toggle_group_"))
 async def toggle_group_call(call: CallbackQuery):
@@ -293,8 +310,9 @@ async def toggle_group_call(call: CallbackQuery):
         
     # Refresh list
     groups = await db.get_all_groups()
-    await call.message.edit_reply_markup(reply_markup=kb.paginated_groups_kb(groups, page))
-    await call.answer()
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_reply_markup(reply_markup=kb.paginated_groups_kb(groups, page))
+    await safe_answer(call)
 
 # Forward Inspector for Quick Add
 @router.message(F.forward_from_chat)
@@ -315,13 +333,15 @@ async def forward_inspector(message: Message):
 async def add_forward_group_call(call: CallbackQuery, bot: Bot):
     chat_id = int(call.data.split("_")[2])
     await db.add_or_update_group(chat_id=chat_id, title=f"Guruh {chat_id}", is_active=True)
-    await call.message.edit_text("✅ Guruh muvaffaqiyatli qo'shildi va faollashtirildi!")
-    await call.answer()
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text("✅ Guruh muvaffaqiyatli qo'shildi va faollashtirildi!")
+    await safe_answer(call)
 
 @router.callback_query(F.data == "dismiss")
 async def dismiss_call(call: CallbackQuery):
-    await call.message.delete()
-    await call.answer()
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.delete()
+    await safe_answer(call)
 
 # Manual Test Trigger
 @router.callback_query(F.data == "trigger_test")
@@ -329,6 +349,6 @@ async def trigger_test_call(call: CallbackQuery, bot: Bot):
     worker_event = getattr(bot, 'worker_test_event', None)
     if worker_event:
         worker_event.set()
-        await call.answer("Sinov yuborish boshlandi!", show_alert=True)
+        await safe_answer(call, "Sinov yuborish boshlandi!", show_alert=True)
     else:
-        await call.answer("Worker tizimi ulanmagan.", show_alert=True)
+        await safe_answer(call, "Worker tizimi ulanmagan.", show_alert=True)
