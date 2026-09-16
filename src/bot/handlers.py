@@ -1,6 +1,6 @@
 import os
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -8,6 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from src import database as db
 from src.bot import keyboards as kb
 from src.config import MEDIA_DIR, DEFAULT_CYCLE_MIN, DEFAULT_CYCLE_MAX, DEFAULT_JITTER_MIN, DEFAULT_JITTER_MAX
+from src.worker.spintax import parse_spintax
 from src.logger import setup_logger
 
 logger = setup_logger("handlers")
@@ -33,23 +34,24 @@ async def render_dashboard(message_or_call, state: FSMContext = None):
     active_groups = len([g for g in groups if g['is_active']])
     total_groups = len(groups)
     
-    content = await db.get_setting("content_text", "No message set.")
+    content = await db.get_setting("content_text", "Xabar hali o'rnatilmagan.")
     media_path = await db.get_setting("media_path", None)
     
-    # Truncate content for preview
-    if len(content) > 100:
-        content = content[:97] + "..."
+    # Truncate content for dashboard preview snippet
+    preview_snippet = content
+    if len(preview_snippet) > 100:
+        preview_snippet = preview_snippet[:97] + "..."
         
     text = (
-        "🎛 **Dual-Engine Broadcast Dashboard**\n\n"
-        f"**State:** {'🟢 RUNNING' if is_running else '🔴 PAUSED'}\n"
-        f"**Groups:** {active_groups} Active / {total_groups} Total\n"
-        f"**Round Interval:** {cycle_min}s - {cycle_max}s\n"
-        f"**Send Jitter:** {jitter_min}s - {jitter_max}s\n"
-        f"**Auto-Delete Prior Post:** {'ON' if auto_cleanup else 'OFF'}\n\n"
-        "**📝 Message Preview:**\n"
-        f"_{content}_\n"
-        f"*{'🖼 Media Attached' if media_path else 'No Media'}*"
+        "🎛 **Xabarlar Tarqatish Boshqaruv Paneli**\n\n"
+        f"**Holat:** {'🟢 FAOL (Ishlayapti)' if is_running else '🔴 TO\'XTATILGAN (Pauza)'}\n"
+        f"**Guruhlar:** {active_groups} ta Faol / {total_groups} ta Jami\n"
+        f"**Doira oralig'i:** {cycle_min}s - {cycle_max}s\n"
+        f"**Yuborish tezligi (Jitter):** {jitter_min}s - {jitter_max}s\n"
+        f"**Oldingi xabarni tozalash:** {'YOQILGAN' if auto_cleanup else 'O\'CHIRILGAN'}\n\n"
+        "**📝 O'rnatilgan xabar:**\n"
+        f"_{preview_snippet}_\n"
+        f"*{'🖼 Rasm/Video biriktirilgan' if media_path else 'Faqat matn'}*"
     )
     
     markup = kb.main_dashboard_kb(is_running, auto_cleanup)
@@ -73,19 +75,51 @@ async def toggle_state_call(call: CallbackQuery):
     is_running = await db.get_setting("is_running", False)
     await db.set_setting("is_running", not is_running)
     await render_dashboard(call)
-    await call.answer("State changed!")
+    await call.answer("Holat o'zgartirildi!")
 
 @router.callback_query(F.data == "toggle_cleanup")
 async def toggle_cleanup_call(call: CallbackQuery):
     auto_cleanup = await db.get_setting("auto_cleanup", False)
     await db.set_setting("auto_cleanup", not auto_cleanup)
     await render_dashboard(call)
-    await call.answer("Auto-cleanup changed!")
+    await call.answer("Avto-tozalash sozlamasi o'zgartirildi!")
+
+# Message Preview Handler
+@router.callback_query(F.data == "preview_message")
+async def preview_message_call(call: CallbackQuery, bot: Bot):
+    content = await db.get_setting("content_text", "")
+    media_path = await db.get_setting("media_path", None)
+    
+    if not content and not media_path:
+        await call.answer("Xabar hali o'rnatilmagan! Avval 'Xabarni tahrirlash' tugmasini bosing.", show_alert=True)
+        return
+        
+    await call.answer("Xabar namunasi tayyorlanmoqda...")
+    
+    # Parse spintax to show a live variation
+    sample_text = parse_spintax(content) if content else ""
+    
+    try:
+        await call.message.answer("👁 **Guruhlarda ko'rinadigan xabar namunasi (Spintax varianti bilan):**", parse_mode="Markdown")
+        
+        if media_path and os.path.exists(media_path):
+            ext = media_path.split('.')[-1].lower()
+            file = FSInputFile(media_path)
+            if ext in ['mp4', 'mov', 'avi', 'mkv']:
+                await bot.send_video(call.from_user.id, file, caption=sample_text, parse_mode="HTML")
+            else:
+                await bot.send_photo(call.from_user.id, file, caption=sample_text, parse_mode="HTML")
+        else:
+            await bot.send_message(call.from_user.id, sample_text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error sending preview: {e}")
+        await call.message.answer(f"⚠️ Xabarni ko'rsatishda xatolik yuz berdi: {e}")
 
 @router.callback_query(F.data == "adjust_timing")
 async def adjust_timing_call(call: CallbackQuery):
     await call.message.edit_text(
-        "⏱ **Adjust Timing**\n\nSelect a preset or enter a custom range for the delay between broadcast rounds.",
+        "⏱ **Vaqt oralig'ini sozlash**\n\n"
+        "Guruhlarga xabar tarqatish doiralari (har bir to'liq aylanma) orasidagi kutish vaqtini tanlang:",
         reply_markup=kb.timing_kb(),
         parse_mode="Markdown"
     )
@@ -94,22 +128,30 @@ async def adjust_timing_call(call: CallbackQuery):
 @router.callback_query(F.data.startswith("time_preset_"))
 async def time_preset_call(call: CallbackQuery):
     preset = call.data.split("_")[2]
-    if preset == "fast":
+    if preset == "1min":
+        c_min, c_max = 60, 90
+        label = "1 daqiqa (60-90s)"
+    elif preset == "fast":
         c_min, c_max = 180, 300
+        label = "Tez (3-5 daqiqa)"
     elif preset == "med":
         c_min, c_max = 300, 600
+        label = "O'rtacha (5-10 daqiqa)"
     elif preset == "relax":
         c_min, c_max = 600, 900
+        label = "Sekin (10-15 daqiqa)"
         
     await db.set_setting("cycle_min", c_min)
     await db.set_setting("cycle_max", c_max)
     await render_dashboard(call)
-    await call.answer(f"Timing set to {preset}!")
+    await call.answer(f"Vaqt sozlandi: {label}")
 
 @router.callback_query(F.data == "time_custom")
 async def time_custom_call(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
-        "Send the minimum and maximum interval in seconds separated by a space.\nExample: `180 300`",
+        "✍️ **O'zingiz vaqt kiriting**\n\n"
+        "Minimal va maksimal kutish vaqtini soniyalarda probel bilan yuboring.\n"
+        "Masalan: `60 90` yoki `180 300`",
         reply_markup=kb.back_kb(),
         parse_mode="Markdown"
     )
@@ -130,15 +172,18 @@ async def process_custom_timing(message: Message, state: FSMContext):
         await db.set_setting("cycle_max", c_max)
         await render_dashboard(message, state)
     except ValueError:
-        await message.answer("Invalid format. Please send two numbers, e.g. `180 300`.", reply_markup=kb.back_kb())
+        await message.answer(
+            "⚠️ Noto'g'ri format. Iltimos, ikkita musbat son kiriting, masalan: `60 90` yoki `180 300`.",
+            reply_markup=kb.back_kb()
+        )
 
 @router.callback_query(F.data == "edit_message")
 async def edit_message_call(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
-        "📝 **Edit Broadcast Message**\n\n"
-        "Send the new text (you can use Spintax like `{A|B}` and formatting).\n"
-        "If you want to attach media, send a Photo or Video with a caption.\n\n"
-        "Note: A new media will replace the old one.",
+        "📝 **Tarqatiladigan xabarni tahrirlash**\n\n"
+        "Yangi matnni yuboring (Spintax variantlaridan foydalanishingiz mumkin, masalan: `{Salom|Assalomu alaykum}` va formatlash teglari).\n\n"
+        "Agar rasm yoki video qo'shmoqchi bo'lsangiz, uni izoh (caption) bilan birga to'g'ridan-to'g'ri botga yuboring.\n\n"
+        "_Eslatma: Yangi media yuborilsa, avvalgi media fayl yangilanadi._",
         reply_markup=kb.back_kb(),
         parse_mode="Markdown"
     )
@@ -158,7 +203,6 @@ async def process_new_message(message: Message, state: FSMContext, bot: Bot):
         
     # Process media
     if message.photo:
-        # Get highest resolution
         photo = message.photo[-1]
         file_id = photo.file_id
         file_info = await bot.get_file(file_id)
@@ -182,19 +226,18 @@ async def process_new_message(message: Message, state: FSMContext, bot: Bot):
     await db.set_setting("content_text", text)
     await db.set_setting("media_path", media_path)
     
-    await message.answer("✅ Message updated successfully!")
+    await message.answer("✅ Xabar muvaffaqiyatli saqlandi!")
     await render_dashboard(message, state)
 
 # Group Management
 @router.callback_query(F.data == "manage_groups")
 async def manage_groups_call(call: CallbackQuery, bot: Bot):
-    # Ask worker to fetch groups
     worker_client = getattr(bot, 'worker_client', None)
     if not worker_client:
-        await call.answer("Worker client not connected.", show_alert=True)
+        await call.answer("Worker akkaunti ulanmagan.", show_alert=True)
         return
         
-    await call.message.edit_text("⏳ Scanning groups, please wait...")
+    await call.message.edit_text("⏳ Guruhlar tekshirilmoqda, iltimos kuting...")
     
     try:
         from telethon.tl.types import Channel, Chat
@@ -202,7 +245,6 @@ async def manage_groups_call(call: CallbackQuery, bot: Bot):
         group_count = 0
         for d in dialogs:
             if d.is_group or d.is_channel:
-                # Telethon treats supergroups as channels, verify megagroup
                 is_valid = False
                 if getattr(d.entity, 'megagroup', False):
                     is_valid = True
@@ -215,19 +257,20 @@ async def manage_groups_call(call: CallbackQuery, bot: Bot):
                         chat_id=d.id,
                         title=d.name,
                         username=username,
-                        # Keep existing active state if it exists, otherwise true
                         is_active=True
                     )
                     group_count += 1
                     
         groups = await db.get_all_groups()
         await call.message.edit_text(
-            f"👥 **Group Management**\nFound {len(groups)} total groups.\nToggle active status:",
+            f"👥 **Guruhlarni Boshqarish**\n"
+            f"Jami {len(groups)} ta guruh topildi.\n"
+            "Xabar yuboriladigan guruhlarni belgilang (✅ - faol, ⬜️ - o'chirilgan):",
             reply_markup=kb.paginated_groups_kb(groups, 0)
         )
     except Exception as e:
         logger.error(f"Error scanning groups: {e}")
-        await call.message.edit_text("Error scanning groups. See logs.", reply_markup=kb.back_kb())
+        await call.message.edit_text("Guruhlarni yuklashda xatolik yuz berdi. Loglarni tekshiring.", reply_markup=kb.back_kb())
 
 @router.callback_query(F.data.startswith("page_groups_"))
 async def page_groups_call(call: CallbackQuery):
@@ -259,22 +302,20 @@ async def forward_inspector(message: Message):
     chat = message.forward_from_chat
     if chat.type in ["group", "supergroup"]:
         text = (
-            f"🔍 **Detected Group from Forward**\n\n"
-            f"**Title:** {chat.title}\n"
+            f"🔍 **Uzatilgan (Forward) xabardan guruh aniqlandi**\n\n"
+            f"**Guruh nomi:** {chat.title}\n"
             f"**ID:** `{chat.id}`\n"
-            f"**Username:** @{chat.username if chat.username else 'N/A'}\n"
+            f"**Username:** @{chat.username if chat.username else 'Mavjud emas'}\n"
         )
         await message.answer(text, reply_markup=kb.forward_confirm_kb(chat.id), parse_mode="Markdown")
     else:
-        await message.answer("Forwarded message is not from a valid group or supergroup.")
+        await message.answer("⚠️ Uzatilgan xabar guruh yoki superguruhdan emas.")
 
 @router.callback_query(F.data.startswith("add_group_"))
 async def add_forward_group_call(call: CallbackQuery, bot: Bot):
     chat_id = int(call.data.split("_")[2])
-    # To get title, we fetch from telegram if possible, but we don't have it in callback.
-    # We will just save it and next scan will update title.
-    await db.add_or_update_group(chat_id=chat_id, title=f"Group {chat_id}", is_active=True)
-    await call.message.edit_text("✅ Group added to active list!")
+    await db.add_or_update_group(chat_id=chat_id, title=f"Guruh {chat_id}", is_active=True)
+    await call.message.edit_text("✅ Guruh muvaffaqiyatli qo'shildi va faollashtirildi!")
     await call.answer()
 
 @router.callback_query(F.data == "dismiss")
@@ -288,6 +329,6 @@ async def trigger_test_call(call: CallbackQuery, bot: Bot):
     worker_event = getattr(bot, 'worker_test_event', None)
     if worker_event:
         worker_event.set()
-        await call.answer("Test round triggered!", show_alert=True)
+        await call.answer("Sinov yuborish boshlandi!", show_alert=True)
     else:
-        await call.answer("Worker not available to test.", show_alert=True)
+        await call.answer("Worker tizimi ulanmagan.", show_alert=True)

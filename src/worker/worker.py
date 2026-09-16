@@ -67,7 +67,7 @@ class BroadcastWorker:
         except FloodWaitError as e:
             wait_time = e.seconds + 3
             logger.error(f"FloodWaitError: Sleeping for {wait_time}s")
-            await self.alert_admin(f"⚠️ **Rate Limit Hit**\nWorker paused for {wait_time} seconds.")
+            await self.alert_admin(f"⚠️ **Telegram cheklovi (FloodWait)**\nWorker {wait_time} soniyaga to'xtatildi. Shundan so'ng avtomatik davom etadi.")
             await asyncio.sleep(wait_time)
             
         except SlowModeWaitError as e:
@@ -77,13 +77,13 @@ class BroadcastWorker:
         except (ChatWriteForbiddenError, UserBannedInChannelError):
             logger.error(f"Write forbidden/banned in {title}. Deactivating.")
             await db.update_group_status(chat_id, "Banned/Muted", is_active=False)
-            await self.alert_admin(f"🚫 **Action Restricted**\nMuted or Banned in group: {title}. Deactivated.")
+            await self.alert_admin(f"🚫 **Guruhda cheklov**\n`{title}` guruhida yozish taqiqlangan yoki hisob cheklangan. Guruh faolsizlantirildi.")
             
         except ChannelPrivateError:
             logger.error(f"Channel {title} is private/kicked. Deactivating.")
             await db.update_group_status(chat_id, "Private/Kicked", is_active=False)
             await db.clear_message_history(chat_id)
-            await self.alert_admin(f"🚫 **Access Lost**\nKicked from group: {title}. Deactivated.")
+            await self.alert_admin(f"🚫 **Guruhga kirish yo'qolgan**\n`{title}` guruhidan chiqarilgan yoki guruh yopiq. Ro'yxatdan o'chirildi.")
             
         except Exception as e:
             logger.error(f"Failed to post to {title}: {e}")
@@ -102,7 +102,7 @@ class BroadcastWorker:
                     is_test = True
                     is_running = True
                     self.test_event.clear()
-                    await self.alert_admin("🧪 **Test Round Started**")
+                    await self.alert_admin("🧪 **Sinov yuborish (Test round) boshlandi**")
 
                 if not is_running:
                     await asyncio.sleep(10)
@@ -138,7 +138,7 @@ class BroadcastWorker:
                     await asyncio.sleep(delay)
                 
                 if is_test:
-                    await self.alert_admin("✅ **Test Round Completed**")
+                    await self.alert_admin("✅ **Sinov yuborish yakunlandi!**")
                     continue
                 
                 # Inter-round cooldown
