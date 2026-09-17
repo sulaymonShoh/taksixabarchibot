@@ -64,12 +64,15 @@ async def add_or_update_group(chat_id: int, title: str, username: Optional[str] 
             VALUES (?, ?, ?, ?, 'Healthy')
             ON CONFLICT(chat_id) DO UPDATE SET 
                 title=excluded.title,
-                username=excluded.username,
-                is_active=excluded.is_active,
-                status='Healthy'
+                username=excluded.username
             ''',
             (chat_id, title, username, is_active)
         )
+        await db.commit()
+
+async def set_all_groups_active(is_active: bool):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE target_groups SET is_active = ?', (1 if is_active else 0,))
         await db.commit()
 
 async def get_all_groups() -> List[Dict[str, Any]]:

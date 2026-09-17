@@ -288,6 +288,28 @@ async def manage_groups_call(call: CallbackQuery, bot: Bot):
             await call.message.edit_text("Guruhlarni yuklashda xatolik yuz berdi. Loglarni tekshiring.", reply_markup=kb.back_kb())
     await safe_answer(call)
 
+@router.callback_query(F.data == "noop")
+async def noop_call(call: CallbackQuery):
+    await safe_answer(call)
+
+@router.callback_query(F.data.startswith("bulk_groups_on_"))
+async def bulk_groups_on_call(call: CallbackQuery):
+    page = int(call.data.split("_")[3])
+    await db.set_all_groups_active(True)
+    groups = await db.get_all_groups()
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_reply_markup(reply_markup=kb.paginated_groups_kb(groups, page))
+    await safe_answer(call, "Barcha guruhlar faollashtirildi!")
+
+@router.callback_query(F.data.startswith("bulk_groups_off_"))
+async def bulk_groups_off_call(call: CallbackQuery):
+    page = int(call.data.split("_")[3])
+    await db.set_all_groups_active(False)
+    groups = await db.get_all_groups()
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_reply_markup(reply_markup=kb.paginated_groups_kb(groups, page))
+    await safe_answer(call, "Barcha guruhlar o'chirildi!")
+
 @router.callback_query(F.data.startswith("page_groups_"))
 async def page_groups_call(call: CallbackQuery):
     page = int(call.data.split("_")[2])

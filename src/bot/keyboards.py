@@ -41,7 +41,7 @@ def back_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")]
     ])
 
-def paginated_groups_kb(groups: List[Dict[str, Any]], page: int, per_page: int = 6) -> InlineKeyboardMarkup:
+def paginated_groups_kb(groups: List[Dict[str, Any]], page: int, per_page: int = 10) -> InlineKeyboardMarkup:
     total_pages = max(1, math.ceil(len(groups) / per_page))
     start_idx = page * per_page
     end_idx = start_idx + per_page
@@ -49,12 +49,18 @@ def paginated_groups_kb(groups: List[Dict[str, Any]], page: int, per_page: int =
     current_groups = groups[start_idx:end_idx]
     
     keyboard = []
+    # Bulk actions row
+    keyboard.append([
+        InlineKeyboardButton(text="✅ Barchasini yoqish", callback_data=f"bulk_groups_on_{page}"),
+        InlineKeyboardButton(text="⬜️ Barchasini o'chirish", callback_data=f"bulk_groups_off_{page}")
+    ])
+    
     for g in current_groups:
         status_icon = "✅" if g.get('is_active') else "⬜️"
         title = g.get('title', 'Noma\'lum guruh')
         # Truncate title if too long
-        if len(title) > 25:
-            title = title[:22] + "..."
+        if len(title) > 28:
+            title = title[:25] + "..."
             
         keyboard.append([
             InlineKeyboardButton(
@@ -67,11 +73,13 @@ def paginated_groups_kb(groups: List[Dict[str, Any]], page: int, per_page: int =
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton(text="« Oldingi", callback_data=f"page_groups_{page-1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(text=f"📄 {page+1}/{total_pages}", callback_data="noop"))
+
     if page < total_pages - 1:
         nav_buttons.append(InlineKeyboardButton(text="Keyingi »", callback_data=f"page_groups_{page+1}"))
         
-    if nav_buttons:
-        keyboard.append(nav_buttons)
+    keyboard.append(nav_buttons)
         
     keyboard.append([InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
