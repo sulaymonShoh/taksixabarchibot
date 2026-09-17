@@ -337,19 +337,76 @@ async def toggle_group_call(call: CallbackQuery):
     await safe_answer(call)
 
 # Forward Inspector for Quick Add
+# Forward Inspector for Quick Add
 @router.message(F.forward_from_chat)
 async def forward_inspector(message: Message):
     chat = message.forward_from_chat
     if chat.type in ["group", "supergroup"]:
+        title = chat.title or f"Guruh {chat.id}"
+        username = chat.username
+        # Store group in DB immediately with active=True and proper title/username
+        await db.add_or_update_group(chat_id=chat.id, title=title, username=username, is_active=True)
+        
+        user_link = f"@{username}" if username else f"`{chat.id}`"
         text = (
-            f"🔍 **Uzatilgan (Forward) xabardan guruh aniqlandi**\n\n"
-            f"**Guruh nomi:** {chat.title}\n"
-            f"**ID:** `{chat.id}`\n"
-            f"**Username:** @{chat.username if chat.username else 'Mavjud emas'}\n"
+            f"✅ **Guruh muvaffaqiyatli qo'shildi va faollashtirildi!**\n\n"
+            f"👥 **Nomi:** [{title}](https://t.me/{username})\n" if username else
+            f"✅ **Guruh muvaffaqiyatli qo'shildi va faollashtirildi!**\n\n"
+            f"👥 **Nomi:** **{title}**\n"
+            f"🆔 **ID:** `{chat.id}`\n"
+            f"🔗 **Havola/Username:** {user_link}\n\n"
+            f"Ushbu guruh keyingi xabar tarqatish doirasida hisobga olinadi."
         )
-        await message.answer(text, reply_markup=kb.forward_confirm_kb(chat.id), parse_mode="Markdown")
+        await message.answer(text, parse_mode="Markdown")
     else:
         await message.answer("⚠️ Uzatilgan xabar guruh yoki superguruhdan emas.")
+
+# Direct Group Link or Username Inspector
+@router.message(F.text.startswith("@") | F.text.contains("t.me/"))
+async def link_group_inspector(message: Message, bot: Bot, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state:
+        # User is in FSM state (like editing message or custom timing), let state handler handle it
+        return
+        
+    worker_client = getattr(bot, 'worker_client', None)
+    if not worker_client:
+        await message.answer("⚠️ Worker akkaunti ulanmagan.")
+        return
+        
+    link_or_user = message.text.strip()
+    try:
+        from telethon.tl.types import Channel, Chat
+        entity = await worker_client.get_entity(link_or_user)
+        is_group = False
+        if getattr(entity, 'megagroup', False) or isinstance(entity, Chat) or (isinstance(entity, Channel) and not entity.broadcast):
+            is_group = True
+            
+        if is_group:
+            title = getattr(entity, 'title', f"Guruh {entity.id}")
+            username = getattr(entity, 'username', None)
+            chat_id = entity.id
+            if not str(chat_id).startswith("-100") and isinstance(entity, Channel):
+                chat_id = int(f"-100{entity.id}")
+                
+            await db.add_or_update_group(chat_id=chat_id, title=title, username=username, is_active=True)
+            user_link = f"@{username}" if username else f"`{chat_id}`"
+            await message.answer(
+                f"✅ **Guruh muvaffaqiyatli qo'shildi va faollashtirildi!**\n\n"
+                f"👥 **Nomi:** **{title}**\n"
+                f"🆔 **ID:** `{chat_id}`\n"
+                f"🔗 **Havola/Username:** {user_link}\n\n"
+                f"Ushbu guruh keyingi doirada xabar oluvchilar ro'yxatiga kiritildi.",
+                parse_mode="Markdown"
+            )
+        else:
+            await message.answer("⚠️ Kiritilgan havola guruhga tegishli emas (kanal yoki shaxsiy profil).")
+    except Exception as e:
+        logger.error(f"Error adding group from link/username: {e}")
+        await message.answer(
+            f"⚠️ Guruhni havola orqali topib bo'lmadi.\n"
+            f"**Maslahat:** Guruhdagi birorta xabarni to'g'ridan-to'g'ri ushbu botga **Forward (Uzatish)** qilib yuboring!"
+        )
 
 @router.callback_query(F.data.startswith("add_group_"))
 async def add_forward_group_call(call: CallbackQuery, bot: Bot):

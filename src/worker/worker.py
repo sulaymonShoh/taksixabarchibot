@@ -18,6 +18,24 @@ from src.logger import setup_logger
 
 logger = setup_logger("worker")
 
+def format_group_display(group: dict) -> str:
+    """Returns a formatted Markdown link for the group if username or supergroup ID is available."""
+    title = group.get('title', 'Noma\'lum guruh')
+    username = group.get('username')
+    chat_id = group.get('chat_id')
+    
+    if username:
+        return f"[{title}](https://t.me/{username})"
+    elif chat_id:
+        str_id = str(chat_id)
+        if str_id.startswith("-100"):
+            clean_id = str_id[4:]
+            return f"[{title}](https://t.me/c/{clean_id}/1)"
+        elif str_id.startswith("-"):
+            clean_id = str_id[1:]
+            return f"[{title}](https://t.me/c/{clean_id}/1)"
+    return f"**{title}**"
+
 class BroadcastWorker:
     def __init__(self, client: TelegramClient, bot: Bot, test_event: asyncio.Event):
         self.client = client
@@ -42,6 +60,7 @@ class BroadcastWorker:
     async def process_group(self, group: dict, content: str, media_path: str, auto_cleanup: bool):
         chat_id = group['chat_id']
         title = group['title']
+        group_display = format_group_display(group)
         
         try:
             # 1. Cleanup old message
@@ -67,23 +86,43 @@ class BroadcastWorker:
         except FloodWaitError as e:
             wait_time = e.seconds + 3
             logger.error(f"FloodWaitError: Sleeping for {wait_time}s")
-            await self.alert_admin(f"⚠️ **Telegram cheklovi (FloodWait)**\nWorker {wait_time} soniyaga to'xtatildi. Shundan so'ng avtomatik davom etadi.")
+            await self.alert_admin(
+                f"⚠️ **Telegram cheklovi (FloodWait)**\n\n"
+                f"Worker {wait_time} soniyaga to'xtatildi.\n"
+                f"Kutish tugagach avtomatik davom etadi."
+            )
             await asyncio.sleep(wait_time)
             
         except SlowModeWaitError as e:
             logger.warning(f"SlowMode in {title}: must wait {e.seconds}s. Skipping.")
             await db.update_group_status(chat_id, "SlowMode")
+            await self.alert_admin(
+                f"⏳ **Guruhda SlowMode aniqlandi**\n\n"
+                f"👥 **Guruh:** {group_display}\n"
+                f"🆔 **ID:** `{chat_id}`\n"
+                f"⚠️ **Kutish vaqti:** {e.seconds} soniya. Guruh bu doirada o'tkazib yuborildi."
+            )
             
         except (ChatWriteForbiddenError, UserBannedInChannelError):
             logger.error(f"Write forbidden/banned in {title}. Deactivating.")
             await db.update_group_status(chat_id, "Banned/Muted", is_active=False)
-            await self.alert_admin(f"🚫 **Guruhda cheklov**\n`{title}` guruhida yozish taqiqlangan yoki hisob cheklangan. Guruh faolsizlantirildi.")
+            await self.alert_admin(
+                f"🚫 **Guruhda cheklov (Muted/Banned)**\n\n"
+                f"👥 **Guruh:** {group_display}\n"
+                f"🆔 **ID:** `{chat_id}`\n"
+                f"⚠️ **Holat:** Yozish taqiqlangan yoki hisob cheklangan. Guruh ro'yxatda faolsizlantirildi."
+            )
             
         except ChannelPrivateError:
             logger.error(f"Channel {title} is private/kicked. Deactivating.")
             await db.update_group_status(chat_id, "Private/Kicked", is_active=False)
             await db.clear_message_history(chat_id)
-            await self.alert_admin(f"🚫 **Guruhga kirish yo'qolgan**\n`{title}` guruhidan chiqarilgan yoki guruh yopiq. Ro'yxatdan o'chirildi.")
+            await self.alert_admin(
+                f"🚫 **Guruhga kirish yo'qolgan (Kicked/Private)**\n\n"
+                f"👥 **Guruh:** {group_display}\n"
+                f"🆔 **ID:** `{chat_id}`\n"
+                f"⚠️ **Holat:** Guruhdan chiqarilgan yoki guruh yopiq. Ro'yxatdan o'chirildi."
+            )
             
         except Exception as e:
             logger.error(f"Failed to post to {title}: {e}")
