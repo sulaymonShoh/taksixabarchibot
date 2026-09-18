@@ -1,26 +1,26 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}Ommaviy Xabar — Taksi Xabarchi{% endblock %}
 {% block content %}
 <div class="p-6 md:p-8 max-w-4xl mx-auto w-full space-y-6">
     <!-- Header -->
     <div>
-        <h2 class="text-2xl font-bold text-white tracking-tight">Ommaviy Xabar Tarqatish</h2>
-        <p class="text-sm text-slate-400 mt-1">Platformada ro'yxatdan o'tgan barcha mijozlarga muhim e'lon va yangiliklarni yuborish</p>
+        <h2 class="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Ommaviy Xabar Tarqatish</h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Platformada ro'yxatdan o'tgan barcha mijozlarga muhim e'lon va yangiliklarni yuborish</p>
     </div>
 
     <!-- Form Card -->
-    <div class="bg-slate-950/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl space-y-5">
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-sm dark:shadow-xl space-y-5">
         <div>
-            <label class="block text-sm font-semibold text-slate-300 mb-2">Xabar matni (Markdown qo'llab-quvvatlanadi):</label>
+            <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Xabar matni (Markdown qo'llab-quvvatlanadi):</label>
             <textarea id="broadcastText" rows="7" placeholder="Masalan: 📢 Diqqat! Yangi chegirmalar boshlandi..." 
-                      class="w-full px-4 py-3 bg-slate-900 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition"></textarea>
+                      class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-amber-500 transition"></textarea>
         </div>
 
-        <div class="flex items-center justify-between pt-3 border-t border-slate-800">
-            <span class="text-xs text-slate-400">
-                <i class="fa-solid fa-info-circle mr-1 text-amber-400"></i> Xabar barcha foydalanuvchilarga bot orqali yetkaziladi.
+        <div class="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+            <span class="text-xs text-slate-500 dark:text-slate-400">
+                <i class="fa-solid fa-info-circle mr-1 text-amber-500"></i> Xabar barcha foydalanuvchilarga bot orqali yetkaziladi.
             </span>
-            <button onclick="sendBroadcast()" id="sendBtn" class="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm rounded-xl transition shadow-lg shadow-amber-500/20 flex items-center">
+            <button onclick="sendBroadcast()" id="sendBtn" class="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm rounded-xl transition shadow-md shadow-amber-500/20 flex items-center cursor-pointer">
                 <i class="fa-solid fa-paper-plane mr-2"></i> Yuborishni Boshlash
             </button>
         </div>
@@ -58,3 +58,4 @@ async function sendBroadcast() {
 }
 </script>
 {% endblock %}
+

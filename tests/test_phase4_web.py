@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import asyncio
 from fastapi.testclient import TestClient
@@ -80,6 +80,25 @@ def test_web_suite():
     assert res_app.status_code == 200
     assert res_app.json()["success"] is True
     print(">>> 8. [PASS] Payment approval API verified.")
+
+    # 9. Space Grotesk font & Theme toggle verified in templates
+    assert "Space Grotesk" in res_dash.text
+    assert "toggleTheme" in res_dash.text
+    assert "Space Grotesk" in res.text # In miniapp too
+    print(">>> 9. [PASS] Space Grotesk font and light/dark theme toggle verified.")
+
+    # 10. Filters verified on Users and Payments pages
+    assert "applyUserFilters" in res_users.text
+    assert "statusFilter" in res_users.text
+    assert "applyPaymentFilters" in res_payments.text
+    assert "planFilter" in res_payments.text
+    assert "photoModal" in res_payments.text
+    print(">>> 10. [PASS] User and Payment filter systems and photo lightbox verified.")
+
+    # 11. Receipt photo endpoint
+    res_photo = client.get("/api/receipt-photo/1", auth=auth)
+    assert res_photo.status_code in [404, 503]
+    print(">>> 11. [PASS] Receipt photo endpoint verified.")
 
     if os.path.exists("data/test_web_suite.db"):
         os.remove("data/test_web_suite.db")

@@ -6,13 +6,13 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Body
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from src import database as db
-from src.config import ADMIN_USERNAME, ADMIN_PASSWORD
+from src.config import ADMIN_USERNAME, ADMIN_PASSWORD, MEDIA_DIR
 from src.logger import setup_logger
 
 logger = setup_logger("web_app")
@@ -111,13 +111,43 @@ async def users_view(request: Request, username: str = Depends(verify_credential
 
 @app.get("/payments", response_class=HTMLResponse)
 async def payments_view(request: Request, username: str = Depends(verify_credentials)):
-    pending = await db.get_pending_payment_requests()
+    all_payments = await db.get_all_payment_requests()
+    pending = [p for p in all_payments if p.get('status') == 'PENDING']
     
     return templates.TemplateResponse(request=request, name="payments.html", context={
         "active_page": "payments",
+        "payments": all_payments,
         "pending_payments": pending,
         "pending_count": len(pending)
     })
+
+@app.get("/api/receipt-photo/{request_id}")
+async def get_receipt_photo(request_id: int, request: Request, username: str = Depends(verify_credentials)):
+    req = await db.get_payment_request(request_id)
+    if not req or not req.get("receipt_file_id"):
+        raise HTTPException(status_code=404, detail="Chek rasmi topilmadi")
+        
+    file_id = req["receipt_file_id"]
+    receipts_dir = os.path.join(MEDIA_DIR, "receipts")
+    os.makedirs(receipts_dir, exist_ok=True)
+    local_path = os.path.join(receipts_dir, f"receipt_{request_id}_{file_id[:16]}.jpg")
+    
+    if os.path.exists(local_path):
+        return FileResponse(local_path, media_type="image/jpeg")
+        
+    bot = getattr(request.app.state, 'bot', None)
+    if not bot:
+        raise HTTPException(status_code=503, detail="Telegram Bot faol emas")
+        
+    try:
+        tg_file = await bot.get_file(file_id)
+        if tg_file and tg_file.file_path:
+            await bot.download_file(tg_file.file_path, destination=local_path)
+            return FileResponse(local_path, media_type="image/jpeg")
+    except Exception as e:
+        logger.error(f"Error downloading receipt photo for request #{request_id}: {e}")
+        
+    raise HTTPException(status_code=404, detail="Rasmni yuklab bo'lmadi")
 
 @app.get("/broadcast", response_class=HTMLResponse)
 async def broadcast_view(request: Request, username: str = Depends(verify_credentials)):

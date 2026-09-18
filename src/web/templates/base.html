@@ -1,70 +1,146 @@
-﻿<!DOCTYPE html>
-<html lang="uz" class="h-full bg-slate-900 text-slate-100">
+<!DOCTYPE html>
+<html lang="uz" class="h-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Taksi Xabarchi Admin{% endblock %}</title>
+    
+    <!-- Google Fonts: Space Grotesk -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Space Grotesk"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Theme Initializer (Prevent flash of unstyled theme) -->
+    <script>
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'light') {
+            document.documentElement.classList.remove('dark');
+        } else {
+            document.documentElement.classList.add('dark');
+        }
+    </script>
+
     <style>
+        body, * {
+            font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .dark .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
     </style>
 </head>
-<body class="h-full flex flex-col md:flex-row font-sans antialiased">
+<body class="h-full flex flex-col md:flex-row bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 antialiased transition-colors duration-200">
     <!-- Sidebar / Mobile Header -->
-    <aside class="w-full md:w-64 bg-slate-950 border-r border-slate-800 flex flex-col flex-shrink-0">
-        <div class="p-5 border-b border-slate-800 flex items-center justify-between">
+    <aside class="w-full md:w-64 bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800 flex flex-col flex-shrink-0 transition-colors duration-200">
+        <div class="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
             <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xl border border-amber-500/30">
+                <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-500 dark:text-amber-400 flex items-center justify-center font-bold text-xl border border-amber-500/30 shadow-sm">
                     🚕
                 </div>
                 <div>
-                    <h1 class="font-bold text-base tracking-wide text-white">Taksi Xabarchi</h1>
-                    <span class="text-xs text-amber-400 font-semibold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">v2.0 SaaS</span>
+                    <h1 class="font-bold text-base tracking-wide text-slate-900 dark:text-white">Taksi Xabarchi</h1>
+                    <span class="text-xs text-amber-600 dark:text-amber-400 font-semibold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">v2.0 SaaS</span>
                 </div>
             </div>
         </div>
         
         <!-- Navigation Links -->
         <nav class="p-4 space-y-1.5 flex-1 custom-scrollbar overflow-y-auto">
-            <a href="/" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition {% if active_page == 'dashboard' %}bg-amber-500/15 text-amber-400 border border-amber-500/30{% else %}text-slate-400 hover:bg-slate-800/60 hover:text-white{% endif %}">
+            <a href="/" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition {% if active_page == 'dashboard' %}bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white{% endif %}">
                 <i class="fa-solid fa-chart-pie w-5 text-center"></i>
                 <span>Boshqaruv Paneli</span>
             </a>
-            <a href="/users" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition {% if active_page == 'users' %}bg-amber-500/15 text-amber-400 border border-amber-500/30{% else %}text-slate-400 hover:bg-slate-800/60 hover:text-white{% endif %}">
+            <a href="/users" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition {% if active_page == 'users' %}bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white{% endif %}">
                 <i class="fa-solid fa-users w-5 text-center"></i>
                 <span>Foydalanuvchilar</span>
             </a>
-            <a href="/payments" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition {% if active_page == 'payments' %}bg-amber-500/15 text-amber-400 border border-amber-500/30{% else %}text-slate-400 hover:bg-slate-800/60 hover:text-white{% endif %}">
+            <a href="/payments" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition {% if active_page == 'payments' %}bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white{% endif %}">
                 <i class="fa-solid fa-receipt w-5 text-center"></i>
                 <span>To'lov Cheklari</span>
                 {% if pending_count and pending_count > 0 %}
-                <span class="ml-auto bg-amber-500 text-slate-950 text-xs font-bold px-2 py-0.5 rounded-full">{{ pending_count }}</span>
+                <span class="ml-auto bg-amber-500 text-slate-950 text-xs font-bold px-2 py-0.5 rounded-full shadow-sm">{{ pending_count }}</span>
                 {% endif %}
             </a>
-            <a href="/broadcast" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition {% if active_page == 'broadcast' %}bg-amber-500/15 text-amber-400 border border-amber-500/30{% else %}text-slate-400 hover:bg-slate-800/60 hover:text-white{% endif %}">
+            <a href="/broadcast" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition {% if active_page == 'broadcast' %}bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white{% endif %}">
                 <i class="fa-solid fa-bullhorn w-5 text-center"></i>
                 <span>Ommaviy Xabar</span>
             </a>
-            <a href="/miniapp" target="_blank" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition text-slate-400 hover:bg-slate-800/60 hover:text-white">
+            <a href="/miniapp" target="_blank" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white">
                 <i class="fa-solid fa-mobile-screen w-5 text-center"></i>
                 <span>Telegram Mini App</span>
-                <i class="fa-solid fa-arrow-up-right-from-square ml-auto text-xs text-slate-500"></i>
+                <i class="fa-solid fa-arrow-up-right-from-square ml-auto text-xs text-slate-400"></i>
             </a>
         </nav>
-        
-        <div class="p-4 border-t border-slate-800 text-xs text-slate-500 flex items-center justify-between">
-            <span>Admin tizimi</span>
-            <span class="flex items-center text-emerald-400 font-medium"><span class="w-2 h-2 rounded-full bg-emerald-500 mr-1.5 animate-pulse"></span> Jonli</span>
+
+        <!-- Theme Toggle Controls -->
+        <div class="p-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+            <button onclick="toggleTheme()" class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition shadow-sm cursor-pointer">
+                <span class="flex items-center space-x-2">
+                    <i id="themeIcon" class="fa-solid fa-moon w-4 text-center text-amber-500"></i>
+                    <span id="themeText">Mavzu: Qorong'u</span>
+                </span>
+                <span class="px-2 py-0.5 rounded bg-white dark:bg-slate-800 text-[10px] font-bold uppercase text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shadow-2xs" id="themeBadge">Dark</span>
+            </button>
+            
+            <div class="text-xs text-slate-500 flex items-center justify-between px-1">
+                <span>Admin tizimi</span>
+                <span class="flex items-center text-emerald-500 font-medium"><span class="w-2 h-2 rounded-full bg-emerald-500 mr-1.5 animate-pulse"></span> Jonli</span>
+            </div>
         </div>
     </aside>
 
     <!-- Main Content Area -->
-    <main class="flex-1 flex flex-col min-w-0 bg-slate-900 overflow-y-auto custom-scrollbar">
+    <main class="flex-1 flex flex-col min-w-0 bg-slate-50 dark:bg-slate-900 overflow-y-auto custom-scrollbar transition-colors duration-200">
         {% block content %}{% endblock %}
     </main>
+
+    <!-- Global Scripts -->
+    <script>
+        function toggleTheme() {
+            const isDark = document.documentElement.classList.toggle('dark');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            updateThemeUI(isDark);
+        }
+        function updateThemeUI(isDark) {
+            const icon = document.getElementById('themeIcon');
+            const text = document.getElementById('themeText');
+            const badge = document.getElementById('themeBadge');
+            if (icon && text && badge) {
+                if (isDark) {
+                    icon.className = 'fa-solid fa-moon w-4 text-center text-amber-500';
+                    text.textContent = 'Mavzu: Qorong\'u';
+                    badge.textContent = 'Dark';
+                } else {
+                    icon.className = 'fa-solid fa-sun w-4 text-center text-amber-500';
+                    text.textContent = 'Mavzu: Yorug\'';
+                    badge.textContent = 'Light';
+                }
+            }
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            updateThemeUI(document.documentElement.classList.contains('dark'));
+        });
+    </script>
 </body>
 </html>
+

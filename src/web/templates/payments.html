@@ -1,70 +1,262 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}To'lov Cheklari — Taksi Xabarchi{% endblock %}
 {% block content %}
 <div class="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-6">
     <!-- Header -->
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-            <h2 class="text-2xl font-bold text-white tracking-tight">To'lov Cheklarini Tekshirish</h2>
-            <p class="text-sm text-slate-400 mt-1">Haydovchilar tomonidan yuborilgan to'lov cheklari va skrinshotlar</p>
+            <h2 class="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">To'lov Cheklarini Boshqarish</h2>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Haydovchilar tomonidan yuklangan to'lov kvitansiyalari va chek skrinshotlari</p>
+        </div>
+        <div class="flex items-center space-x-2">
+            {% if pending_count and pending_count > 0 %}
+            <span class="text-xs font-semibold px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 animate-pulse">
+                ⏳ Kutilayotgan: <strong class="font-bold">{{ pending_count }}</strong> ta
+            </span>
+            {% endif %}
         </div>
     </div>
 
-    {% if pending_payments %}
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {% for p in pending_payments %}
-        <div class="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between backdrop-blur-sm shadow-xl">
+    <!-- Filters & Search Toolbar -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4 backdrop-blur-sm shadow-sm dark:shadow-xl space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <!-- Search Bar -->
+            <div class="lg:col-span-2 relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+                <input type="text" id="searchInput" oninput="applyPaymentFilters()" placeholder="User ID yoki Chek ID orqali qidirish..." 
+                       class="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-amber-500 transition">
+            </div>
+
+            <!-- Status Filter -->
             <div>
-                <div class="flex items-center justify-between mb-3">
-                    <span class="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold">
+                <select id="statusFilter" onchange="applyPaymentFilters()" 
+                        class="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 transition cursor-pointer">
+                    <option value="all">Barcha cheklar</option>
+                    <option value="PENDING" selected>⏳ Kutilayotganlar</option>
+                    <option value="APPROVED">✅ Tasdiqlanganlar</option>
+                    <option value="REJECTED">❌ Rad etilganlar</option>
+                </select>
+            </div>
+
+            <!-- Plan Filter -->
+            <div>
+                <select id="planFilter" onchange="applyPaymentFilters()" 
+                        class="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 transition cursor-pointer">
+                    <option value="all">Barcha tariflar</option>
+                    <option value="1">1 Oylik tarif</option>
+                    <option value="3">3 Oylik tarif</option>
+                    <option value="6">6 Oylik tarif</option>
+                    <option value="12">12 Oylik VIP</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/60 text-xs text-slate-500">
+            <span>Ko'rsatilmoqda: <strong class="text-slate-800 dark:text-slate-200" id="visibleCount">0</strong> ta chek</span>
+            <button onclick="resetFilters()" class="text-amber-600 dark:text-amber-400 hover:underline font-medium cursor-pointer">Filtrlarni tozalash</button>
+        </div>
+    </div>
+
+    <!-- Payments Grid -->
+    {% set items = payments if payments is defined else pending_payments %}
+    {% if items %}
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="paymentsGrid">
+        {% for p in items %}
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 flex flex-col justify-between backdrop-blur-sm shadow-sm dark:shadow-xl payment-card transition hover:border-amber-500/50"
+             data-id="{{ p.id }}"
+             data-user-id="{{ p.user_id }}"
+             data-status="{{ p.status }}"
+             data-plan="{{ p.plan_months }}">
+            
+            <div class="space-y-3">
+                <!-- Card Header -->
+                <div class="flex items-center justify-between">
+                    <span class="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-bold">
                         Chek #{{ p.id }}
                     </span>
-                    <span class="text-xs text-slate-400">{{ p.created_at }}</span>
+                    
+                    <!-- Status Badge -->
+                    {% if p.status == 'PENDING' %}
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                        ⏳ Kutilmoqda
+                    </span>
+                    {% elif p.status == 'APPROVED' %}
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                        ✅ Tasdiqlangan
+                    </span>
+                    {% else %}
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                        ❌ Rad etilgan
+                    </span>
+                    {% endif %}
+                </div>
+
+                <!-- Receipt Photo Preview (Click to Zoom) -->
+                <div class="relative w-full h-44 bg-slate-100 dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800/80 group cursor-pointer shadow-inner"
+                     onclick="openPhotoModal('/api/receipt-photo/{{ p.id }}', 'Chek #{{ p.id }} (User: {{ p.user_id }}) — {{ p.amount_uzs }} so\'m')">
+                    <img src="/api/receipt-photo/{{ p.id }}" 
+                         alt="Chek rasmi" 
+                         loading="lazy"
+                         class="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                         onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\'w-full h-full flex flex-col items-center justify-center text-slate-400 text-xs p-3 text-center\'><i class=\'fa-solid fa-receipt text-2xl mb-1.5 text-slate-400\'></i>Rasmni ko\'rish uchun bosing yoki Telegram bot orqali tekshiring</div>';">
+                    
+                    <div class="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white font-medium text-xs backdrop-blur-[2px]">
+                        <i class="fa-solid fa-magnifying-glass-plus mr-1.5 text-amber-400"></i> Kattalashtirib ko'rish
+                    </div>
                 </div>
                 
-                <div class="space-y-2 mb-4">
-                    <div class="flex justify-between text-sm">
-                        <span class="text-slate-400">User ID:</span>
-                        <span class="text-white font-mono font-bold">{{ p.user_id }}</span>
+                <!-- Details -->
+                <div class="space-y-1.5 pt-1 text-xs">
+                    <div class="flex justify-between">
+                        <span class="text-slate-500 dark:text-slate-400">User ID:</span>
+                        <span class="text-slate-900 dark:text-white font-mono font-bold">{{ p.user_id }}</span>
                     </div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-slate-400">Tanlangan tarif:</span>
-                        <span class="text-amber-400 font-semibold">{{ p.plan_months }} Oy</span>
+                    <div class="flex justify-between">
+                        <span class="text-slate-500 dark:text-slate-400">Tanlangan tarif:</span>
+                        <span class="text-amber-600 dark:text-amber-400 font-semibold">{{ p.plan_months }} Oy</span>
                     </div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-slate-400">To'lov summasi:</span>
-                        <span class="text-emerald-400 font-bold font-mono">{{ p.amount_uzs }} so'm</span>
+                    <div class="flex justify-between">
+                        <span class="text-slate-500 dark:text-slate-400">To'lov summasi:</span>
+                        <span class="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{{ p.amount_uzs }} so'm</span>
                     </div>
-                    <div class="flex justify-between text-sm">
-                        <span class="text-slate-400">Telegram File ID:</span>
-                        <span class="text-xs text-slate-500 font-mono truncate max-w-[180px]">{{ p.receipt_file_id }}</span>
+                    <div class="flex justify-between">
+                        <span class="text-slate-500 dark:text-slate-400">Yuborilgan vaqt:</span>
+                        <span class="text-slate-600 dark:text-slate-400 font-mono text-[11px]">{{ p.created_at }}</span>
                     </div>
                 </div>
             </div>
 
-            <div class="pt-4 border-t border-slate-800 flex items-center space-x-3">
-                <button onclick="approvePayment({{ p.id }}, {{ p.user_id }}, {{ p.plan_months }})" 
-                        class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition shadow-lg shadow-emerald-600/20">
-                    <i class="fa-solid fa-check mr-1.5"></i> Tasdiqlash (+{{ p.plan_months }}m)
-                </button>
-                <button onclick="rejectPayment({{ p.id }})" 
-                        class="py-2 px-3 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 font-bold text-xs rounded-xl border border-rose-500/30 transition">
-                    <i class="fa-solid fa-xmark"></i> Rad etish
-                </button>
+            <!-- Action Buttons / Status Banner -->
+            <div class="pt-4 mt-3 border-t border-slate-100 dark:border-slate-800">
+                {% if p.status == 'PENDING' %}
+                <div class="flex items-center space-x-2">
+                    <button onclick="approvePayment({{ p.id }}, {{ p.user_id }}, {{ p.plan_months }})" 
+                            class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition shadow-sm cursor-pointer">
+                        <i class="fa-solid fa-check mr-1"></i> Tasdiqlash (+{{ p.plan_months }}m)
+                    </button>
+                    <button onclick="rejectPayment({{ p.id }})" 
+                            class="py-2 px-3 bg-rose-600/10 hover:bg-rose-600/20 text-rose-600 dark:text-rose-400 font-bold text-xs rounded-xl border border-rose-500/30 transition cursor-pointer">
+                        <i class="fa-solid fa-xmark"></i> Rad etish
+                    </button>
+                </div>
+                {% elif p.status == 'APPROVED' %}
+                <div class="py-1.5 px-3 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs font-semibold text-center border border-emerald-500/20">
+                    <i class="fa-solid fa-check-double mr-1"></i> Ushbu to'lov muvaffaqiyatli tasdiqlangan
+                </div>
+                {% else %}
+                <div class="py-1.5 px-3 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-semibold text-center border border-rose-500/20">
+                    <i class="fa-solid fa-circle-xmark mr-1"></i> Ushbu chek rad etilgan
+                </div>
+                {% endif %}
             </div>
         </div>
         {% endfor %}
     </div>
+
+    <!-- Empty State -->
+    <div id="noPaymentsState" class="hidden bg-white dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-12 text-center text-slate-500 shadow-sm">
+        <i class="fa-solid fa-receipt text-4xl text-amber-500/50 mb-3"></i>
+        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Tanlangan parametrlar bo'yicha cheklar topilmadi</h3>
+        <p class="text-sm text-slate-500 mt-1">Qidiruv so'zini yoki filtr statusini o'zgartirib ko'ring.</p>
+        <button onclick="resetFilters()" class="mt-3 text-xs text-amber-600 dark:text-amber-400 hover:underline font-semibold cursor-pointer">Barcha cheklarni ko'rish</button>
+    </div>
     {% else %}
-    <div class="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-12 text-center text-slate-400">
+    <div class="bg-white dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-12 text-center text-slate-500 shadow-sm">
         <i class="fa-solid fa-circle-check text-4xl text-emerald-500/50 mb-3"></i>
-        <h3 class="text-lg font-semibold text-white">Hozircha kutilayotgan cheklar yo'q</h3>
-        <p class="text-sm text-slate-500 mt-1">Yangi to'lov cheki yuborilganda bu yerda va Telegram kanalida darhol ko'rinadi.</p>
+        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">To'lov cheklari mavjud emas</h3>
+        <p class="text-sm text-slate-500 mt-1">Yangi to'lov cheki yuborilganda bu yerda darhol aks etadi.</p>
     </div>
     {% endif %}
 </div>
 
+<!-- Photo Lightbox Modal -->
+<div id="photoModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4 transition-all">
+    <div class="relative max-w-2xl w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+        <div class="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <h3 class="font-bold text-sm text-slate-900 dark:text-white" id="modalTitle">Chek Rasmi</h3>
+            <button onclick="closePhotoModal()" class="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition cursor-pointer">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="p-4 flex-1 overflow-auto flex items-center justify-center bg-slate-100 dark:bg-slate-950">
+            <img id="modalImg" src="" alt="Chek" class="max-w-full max-h-[70vh] object-contain rounded-lg shadow-md">
+        </div>
+        <div class="p-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
+            <a id="downloadLink" href="" target="_blank" download class="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl transition flex items-center">
+                <i class="fa-solid fa-arrow-down mr-1.5"></i> Yuklab olish
+            </a>
+            <button onclick="closePhotoModal()" class="px-3.5 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl hover:bg-slate-300 dark:hover:bg-slate-700 transition cursor-pointer">
+                Yopish
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
+function applyPaymentFilters() {
+    const query = document.getElementById("searchInput").value.trim().toLowerCase();
+    const status = document.getElementById("statusFilter").value;
+    const plan = document.getElementById("planFilter").value;
+    
+    const cards = Array.from(document.querySelectorAll(".payment-card"));
+    let visible = 0;
+    
+    cards.forEach(card => {
+        const id = (card.getAttribute("data-id") || "").toLowerCase();
+        const userId = (card.getAttribute("data-user-id") || "").toLowerCase();
+        const cardStatus = card.getAttribute("data-status") || "";
+        const cardPlan = card.getAttribute("data-plan") || "";
+        
+        const matchQuery = !query || id.includes(query) || userId.includes(query);
+        const matchStatus = status === "all" || cardStatus === status;
+        const matchPlan = plan === "all" || cardPlan === plan;
+        
+        if (matchQuery && matchStatus && matchPlan) {
+            card.style.display = "";
+            visible++;
+        } else {
+            card.style.display = "none";
+        }
+    });
+    
+    const countEl = document.getElementById("visibleCount");
+    if (countEl) countEl.textContent = visible;
+    
+    const noState = document.getElementById("noPaymentsState");
+    if (noState) noState.classList.toggle("hidden", visible > 0);
+}
+
+function resetFilters() {
+    document.getElementById("searchInput").value = "";
+    document.getElementById("statusFilter").value = "all";
+    document.getElementById("planFilter").value = "all";
+    applyPaymentFilters();
+}
+
+function openPhotoModal(imgSrc, title) {
+    document.getElementById("modalImg").src = imgSrc;
+    document.getElementById("modalTitle").textContent = title;
+    document.getElementById("downloadLink").href = imgSrc;
+    const modal = document.getElementById("photoModal");
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+}
+
+function closePhotoModal() {
+    const modal = document.getElementById("photoModal");
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+}
+
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closePhotoModal();
+});
+
+// Run filter once on page load
+document.addEventListener("DOMContentLoaded", () => {
+    applyPaymentFilters();
+});
+
 async function approvePayment(requestId, userId, months) {
     if (!confirm(`Chek #${requestId} ni tasdiqlab, foydalanuvchiga +${months} oylik obuna berishni tasdiqlaysizmi?`)) return;
     let res = await fetch(`/api/payments/${requestId}/approve`, {
@@ -96,3 +288,4 @@ async function rejectPayment(requestId) {
 }
 </script>
 {% endblock %}
+

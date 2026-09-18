@@ -280,6 +280,17 @@ async def get_pending_payment_requests() -> List[Dict[str, Any]]:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+async def get_all_payment_requests(status: Optional[str] = None) -> List[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if status:
+            async with db.execute('SELECT * FROM payment_requests WHERE status = ? ORDER BY created_at DESC', (status,)) as cursor:
+                rows = await cursor.fetchall()
+        else:
+            async with db.execute('SELECT * FROM payment_requests ORDER BY created_at DESC') as cursor:
+                rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
 async def update_payment_request_status(request_id: int, status: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('UPDATE payment_requests SET status = ? WHERE id = ?', (status, request_id))
