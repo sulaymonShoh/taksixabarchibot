@@ -1,67 +1,74 @@
 import asyncio
 import signal
+import uvicorn
 from aiogram import Bot, Dispatcher
-from telethon import TelegramClient
 from src import database as db
-from src.config import validate_config, BOT_TOKEN, API_ID, API_HASH, SESSION_NAME
-from src.bot.middleware import AdminWhitelistMiddleware
+from src.config import validate_config, BOT_TOKEN, WEB_HOST, WEB_PORT
+from src.bot.middleware import UserRegistrationMiddleware
 from src.bot.handlers import router
-from src.worker.worker import BroadcastWorker
+from src.worker.worker_manager import WorkerManager
+from src.web.app import app as web_app
 from src.logger import setup_logger
 
 logger = setup_logger("main")
 
 async def main():
-    logger.info("Starting Dual-Engine Telegram Broadcast System...")
+    logger.info("Starting Taksi Xabarchi v2.0 Multi-User SaaS Platform...")
     validate_config()
     
-    # Init DB
+    # 1. Initialize Multi-Tenant Database
     await db.init_db()
 
-    # Initialize Bot (aiogram)
+    # 2. Initialize Telegram Bot (aiogram)
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     
-    # Apply security middleware
-    dp.update.middleware(AdminWhitelistMiddleware())
+    # Apply user auto-registration & access middleware
+    dp.update.middleware(UserRegistrationMiddleware())
     dp.include_router(router)
     
-    # Initialize MTProto Client (Telethon)
-    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+    # 3. Initialize Multi-Worker Manager
+    worker_manager = WorkerManager(bot)
+    bot.worker_manager = worker_manager
+    worker_manager.start_sync_loop()
     
-    # Event for manual tests
-    worker_test_event = asyncio.Event()
+    # 4. Attach dependencies to FastAPI web state
+    web_app.state.bot = bot
+    web_app.state.worker_manager = worker_manager
     
-    # Share objects via bot instance for handlers
-    bot.worker_client = client
-    bot.worker_test_event = worker_test_event
-
-    # Worker instance
-    worker = BroadcastWorker(client, bot, worker_test_event)
+    # 5. Configure Uvicorn Web Server
+    uvicorn_config = uvicorn.Config(
+        app=web_app,
+        host=WEB_HOST,
+        port=WEB_PORT,
+        log_level="warning",
+        access_log=False
+    )
+    uvicorn_server = uvicorn.Server(uvicorn_config)
     
-    # Start MTProto client
-    # Note: Requires auth.py to have been run to generate .session
-    await client.start()
-    logger.info("MTProto Worker Client started successfully.")
+    logger.info(f"Web Admin & Mini App server configured on http://{WEB_HOST}:{WEB_PORT}")
     
-    # Start tasks
-    loop = asyncio.get_running_loop()
-    worker_task = loop.create_task(worker.run_loop())
-    
+    # 6. Run Bot Polling and Web Server Concurrently
     try:
-        logger.info("Starting Bot Polling...")
         await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot, drop_pending_updates=True)
+        logger.info("Bot polling and Web server starting...")
+        
+        await asyncio.gather(
+            dp.start_polling(bot, drop_pending_updates=True),
+            uvicorn_server.serve()
+        )
     except asyncio.CancelledError:
         pass
     finally:
-        logger.info("Shutting down...")
-        worker_task.cancel()
-        await client.disconnect()
+        logger.info("Gracefully shutting down Taksi Xabarchi services...")
+        await worker_manager.stop_all()
+        uvicorn_server.should_exit = True
         await bot.session.close()
+        logger.info("Shutdown complete.")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Process interrupted by user. Exiting cleanly.")
+        logger.info("Process terminated by user. Exiting.")
+
