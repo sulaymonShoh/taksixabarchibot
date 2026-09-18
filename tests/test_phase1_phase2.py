@@ -165,6 +165,34 @@ def test_keyboards():
     
     print("   [PASS] All Keyboards, callback identifiers, and pagination logic verified.")
 
+async def test_user_client_scope():
+    print(">>> 4. Testing user_client_scope Context Manager")
+    # Unauthenticated user returns None
+    async with auth_flow.user_client_scope(99999999) as client:
+        assert client is None
+        
+    # Active worker client is yielded directly without disconnection
+    class MockClient:
+        def __init__(self):
+            self.disconnected = False
+        def is_connected(self):
+            return True
+        async def disconnect(self):
+            self.disconnected = True
+
+    class MockWorkerMgr:
+        def __init__(self, client):
+            self.c = client
+        def get_user_client(self, uid):
+            return self.c
+            
+    mock_c = MockClient()
+    mgr = MockWorkerMgr(mock_c)
+    async with auth_flow.user_client_scope(12345, mgr) as c:
+        assert c is mock_c
+    assert not mock_c.disconnected # Must NOT disconnect active worker client!
+    print("   [PASS] user_client_scope behavior verified.")
+
 async def main():
     print("=" * 60)
     print("TEST SUITE: PHASE 1 (Database & Auth) & PHASE 2 (Bot UI & Handlers)")
@@ -172,6 +200,7 @@ async def main():
     await test_database_multi_tenant()
     test_auth_utilities()
     test_keyboards()
+    await test_user_client_scope()
     
     # Cleanup test DB
     if os.path.exists("data/test_suite.db"):

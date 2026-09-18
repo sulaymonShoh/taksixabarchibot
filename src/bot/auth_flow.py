@@ -28,6 +28,33 @@ def is_user_authenticated(user_id: int) -> bool:
     session_file = f"{get_user_session_path(user_id)}.session"
     return os.path.exists(session_file)
 
+@contextlib.asynccontextmanager
+async def user_client_scope(user_id: int, worker_mgr=None):
+    """Context manager yielding an active or temporary Telethon TelegramClient for user_id."""
+    active_client = worker_mgr.get_user_client(user_id) if worker_mgr else None
+    if active_client and active_client.is_connected():
+        yield active_client
+        return
+
+    if not is_user_authenticated(user_id):
+        yield None
+        return
+
+    session_path = get_user_session_path(user_id)
+    temp_client = TelegramClient(session_path, API_ID, API_HASH)
+    try:
+        await temp_client.connect()
+        if await temp_client.is_user_authorized():
+            yield temp_client
+        else:
+            yield None
+    except Exception as e:
+        logger.error(f"Error opening temporary client for user {user_id}: {e}")
+        yield None
+    finally:
+        with contextlib.suppress(Exception):
+            await temp_client.disconnect()
+
 async def start_phone_login(user_id: int, phone: str) -> Dict[str, Any]:
     """Initiates login with phone number and sends verification code."""
     # Clean phone number

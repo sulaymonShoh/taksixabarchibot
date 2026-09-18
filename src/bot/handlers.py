@@ -217,8 +217,11 @@ async def process_phone_input(message: Message, state: FSMContext):
     status_msg = await message.answer("⏳ Telegram serveriga ulanmoqda va tasdiqlash kodi so'ralmoqda...", reply_markup=ReplyKeyboardRemove())
     
     res = await auth_flow.start_phone_login(user_id, clean_phone)
+    with contextlib.suppress(Exception):
+        await status_msg.delete()
+
     if not res.get("success"):
-        await status_msg.edit_text(
+        await message.answer(
             f"❌ **Xatolik yuz berdi:**\n{res.get('error')}\n\nIltimos, raqamni tekshirib qaytadan urinib ko'ring:",
             reply_markup=kb.cancel_auth_kb(),
             parse_mode="Markdown"
@@ -232,7 +235,7 @@ async def process_phone_input(message: Message, state: FSMContext):
         "👉 **Kodni probellar bilan ajratib yozib yuboring:**\n"
         "Masalan: `1 2 3 4 5`"
     )
-    await status_msg.edit_text(code_prompt, reply_markup=kb.cancel_auth_kb(), parse_mode="Markdown")
+    await message.answer(code_prompt, reply_markup=kb.cancel_auth_kb(), parse_mode="Markdown")
 
 @router.message(AuthStates.waiting_for_code, F.text)
 async def process_code_input(message: Message, state: FSMContext, bot: Bot):
@@ -264,10 +267,12 @@ async def process_code_input(message: Message, state: FSMContext, bot: Bot):
     # Successful login without 2FA
     await state.clear()
     
-    # Notify worker manager to start worker if needed
-    worker_mgr = getattr(bot, 'worker_manager', None)
-    if worker_mgr:
-        await worker_mgr.start_user_worker(user_id)
+    # Notify worker manager to start worker if enabled in settings
+    settings = await db.get_user_settings(user_id)
+    if settings.get("is_running", False):
+        worker_mgr = getattr(bot, 'worker_manager', None)
+        if worker_mgr:
+            await worker_mgr.start_user_worker(user_id)
         
     await status_msg.edit_text("🎉 **Tabriklaymiz! Telegram akkauntingiz muvaffaqiyatli ulandi!**")
     await render_dashboard(message, user_id, state)
@@ -289,9 +294,11 @@ async def process_2fa_input(message: Message, state: FSMContext, bot: Bot):
         return
         
     await state.clear()
-    worker_mgr = getattr(bot, 'worker_manager', None)
-    if worker_mgr:
-        await worker_mgr.start_user_worker(user_id)
+    settings = await db.get_user_settings(user_id)
+    if settings.get("is_running", False):
+        worker_mgr = getattr(bot, 'worker_manager', None)
+        if worker_mgr:
+            await worker_mgr.start_user_worker(user_id)
         
     await status_msg.edit_text("🎉 **Tabriklaymiz! Akkauntingiz muvaffaqiyatli ulandi!**")
     await render_dashboard(message, user_id, state)
@@ -566,21 +573,24 @@ async def source_cmd(message: Message, bot: Bot, state: FSMContext):
     elif len(parts) > 1:
         target_input = parts[1].strip()
         worker_mgr = getattr(bot, 'worker_manager', None)
-        client = worker_mgr.get_user_client(user_id) if worker_mgr else None
-        if client:
-            try:
-                if target_input.startswith("-100"):
-                    target_input = int(target_input)
-                entity = await client.get_entity(target_input)
-                source_chat_id = entity.id
-                source_chat_title = getattr(entity, 'title', f"Chat {entity.id}")
-                if not str(source_chat_id).startswith("-100"):
-                    from telethon.tl.types import Channel
-                    if isinstance(entity, Channel):
-                        source_chat_id = int(f"-100{entity.id}")
-            except Exception as e:
-                logger.error(f"Error resolving source chat via command: {e}")
-                await message.answer(f"⚠️ Manba guruhni aniqlab bo'lmadi: {e}", parse_mode="Markdown")
+        async with auth_flow.user_client_scope(user_id, worker_mgr) as client:
+            if client:
+                try:
+                    if target_input.startswith("-100"):
+                        target_input = int(target_input)
+                    entity = await client.get_entity(target_input)
+                    source_chat_id = entity.id
+                    source_chat_title = getattr(entity, 'title', f"Chat {entity.id}")
+                    if not str(source_chat_id).startswith("-100"):
+                        from telethon.tl.types import Channel
+                        if isinstance(entity, Channel):
+                            source_chat_id = int(f"-100{entity.id}")
+                except Exception as e:
+                    logger.error(f"Error resolving source chat via command: {e}")
+                    await message.answer(f"⚠️ Manba guruhni aniqlab bo'lmadi: {e}", parse_mode="Markdown")
+                    return
+            else:
+                await message.answer("⚠️ Avval Telegram akkauntingizni ulang.", reply_markup=kb.back_kb())
                 return
     else:
         await message.answer(
@@ -628,22 +638,25 @@ async def process_source_chat_input(message: Message, state: FSMContext, bot: Bo
         source_chat_title = message.forward_from_chat.title or f"Chat {source_chat_id}"
     elif message.text and (message.text.startswith("@") or "t.me/" in message.text or message.text.startswith("-100")):
         worker_mgr = getattr(bot, 'worker_manager', None)
-        client = worker_mgr.get_user_client(user_id) if worker_mgr else None
-        if client:
-            try:
-                entity_input = message.text.strip()
-                if entity_input.startswith("-100"):
-                    entity_input = int(entity_input)
-                entity = await client.get_entity(entity_input)
-                source_chat_id = entity.id
-                source_chat_title = getattr(entity, 'title', f"Chat {entity.id}")
-                if not str(source_chat_id).startswith("-100"):
-                    from telethon.tl.types import Channel
-                    if isinstance(entity, Channel):
-                        source_chat_id = int(f"-100{entity.id}")
-            except Exception as e:
-                logger.error(f"Error resolving source chat: {e}")
-                await message.answer("⚠️ Guruhni havola orqali topib bo'lmadi. Iltimos, xabarni Forward qilib yuboring!", reply_markup=kb.back_kb())
+        async with auth_flow.user_client_scope(user_id, worker_mgr) as client:
+            if client:
+                try:
+                    entity_input = message.text.strip()
+                    if entity_input.startswith("-100"):
+                        entity_input = int(entity_input)
+                    entity = await client.get_entity(entity_input)
+                    source_chat_id = entity.id
+                    source_chat_title = getattr(entity, 'title', f"Chat {entity.id}")
+                    if not str(source_chat_id).startswith("-100"):
+                        from telethon.tl.types import Channel
+                        if isinstance(entity, Channel):
+                            source_chat_id = int(f"-100{entity.id}")
+                except Exception as e:
+                    logger.error(f"Error resolving source chat: {e}")
+                    await message.answer("⚠️ Guruhni havola orqali topib bo'lmadi. Iltimos, xabarni Forward qilib yuboring!", reply_markup=kb.back_kb())
+                    return
+            else:
+                await message.answer("⚠️ Avval Telegram akkauntingizni ulang.", reply_markup=kb.back_kb())
                 return
                 
     if source_chat_id:
@@ -664,12 +677,11 @@ async def process_source_chat_input(message: Message, state: FSMContext, bot: Bo
 async def manage_groups_call(call: CallbackQuery, bot: Bot):
     user_id = call.from_user.id
     worker_mgr = getattr(bot, 'worker_manager', None)
-    client = worker_mgr.get_user_client(user_id) if worker_mgr else None
-    
-    if client and client.is_connected():
-        try:
-            from telethon.tl.types import Channel, Chat
-            dialogs = await client.get_dialogs()
+    async with auth_flow.user_client_scope(user_id, worker_mgr) as client:
+        if client and client.is_connected():
+            try:
+                from telethon.tl.types import Channel, Chat
+                dialogs = await client.get_dialogs()
             settings = await db.get_user_settings(user_id)
             source_chat_id = settings.get("source_chat_id")
             
@@ -786,40 +798,40 @@ async def link_group_inspector(message: Message, bot: Bot, state: FSMContext):
         return
         
     worker_mgr = getattr(bot, 'worker_manager', None)
-    client = worker_mgr.get_user_client(user_id) if worker_mgr else None
-    if not client:
-        await message.answer("⚠️ Avval Telegram akkauntingizni ulang.")
-        return
-        
-    link_or_user = message.text.strip()
-    try:
-        from telethon.tl.types import Channel, Chat
-        entity = await client.get_entity(link_or_user)
-        is_group = False
-        if getattr(entity, 'megagroup', False) or isinstance(entity, Chat) or (isinstance(entity, Channel) and not entity.broadcast):
-            is_group = True
+    async with auth_flow.user_client_scope(user_id, worker_mgr) as client:
+        if not client:
+            await message.answer("⚠️ Avval Telegram akkauntingizni ulang.")
+            return
             
-        if is_group:
-            title = getattr(entity, 'title', f"Guruh {entity.id}")
-            username = getattr(entity, 'username', None)
-            chat_id = entity.id
-            if not str(chat_id).startswith("-100") and isinstance(entity, Channel):
-                chat_id = int(f"-100{entity.id}")
+        link_or_user = message.text.strip()
+        try:
+            from telethon.tl.types import Channel, Chat
+            entity = await client.get_entity(link_or_user)
+            is_group = False
+            if getattr(entity, 'megagroup', False) or isinstance(entity, Chat) or (isinstance(entity, Channel) and not entity.broadcast):
+                is_group = True
                 
-            await db.add_or_update_user_group(user_id=user_id, chat_id=chat_id, title=title, username=username, is_active=True)
-            user_link = f"@{username}" if username else f"`{chat_id}`"
-            await message.answer(
-                f"✅ **Guruh muvaffaqiyatli qo'shildi!**\n\n"
-                f"👥 **Nomi:** **{title}**\n"
-                f"🆔 **ID:** `{chat_id}`\n"
-                f"🔗 **Havola:** {user_link}",
-                parse_mode="Markdown"
-            )
-        else:
-            await message.answer("⚠️ Kiritilgan havola guruhga tegishli emas.")
-    except Exception as e:
-        logger.error(f"Error adding group from link for user {user_id}: {e}")
-        await message.answer("⚠️ Guruhni havola orqali topib bo'lmadi. Guruhdagi birorta xabarni botga Forward qiling!")
+            if is_group:
+                title = getattr(entity, 'title', f"Guruh {entity.id}")
+                username = getattr(entity, 'username', None)
+                chat_id = entity.id
+                if not str(chat_id).startswith("-100") and isinstance(entity, Channel):
+                    chat_id = int(f"-100{entity.id}")
+                    
+                await db.add_or_update_user_group(user_id=user_id, chat_id=chat_id, title=title, username=username, is_active=True)
+                user_link = f"@{username}" if username else f"`{chat_id}`"
+                await message.answer(
+                    f"✅ **Guruh muvaffaqiyatli qo'shildi!**\n\n"
+                    f"👥 **Nomi:** **{title}**\n"
+                    f"🆔 **ID:** `{chat_id}`\n"
+                    f"🔗 **Havola:** {user_link}",
+                    parse_mode="Markdown"
+                )
+            else:
+                await message.answer("⚠️ Kiritilgan havola guruhga tegishli emas.")
+        except Exception as e:
+            logger.error(f"Error adding group from link for user {user_id}: {e}")
+            await message.answer("⚠️ Guruhni havola orqali topib bo'lmadi. Guruhdagi birorta xabarni botga Forward qiling!")
 
 # ==================== TIMING & JITTER CONFIG ====================
 @router.callback_query(F.data == "adjust_timing")
@@ -983,22 +995,22 @@ async def remove_group_cmd(message: Message, bot: Bot):
             
     if not target_chat_id:
         worker_mgr = getattr(bot, 'worker_manager', None)
-        client = worker_mgr.get_user_client(user_id) if worker_mgr else None
-        if client:
-            try:
-                entity = await client.get_entity(query)
-                entity_id = entity.id
-                if not str(entity_id).startswith("-100"):
-                    from telethon.tl.types import Channel
-                    if isinstance(entity, Channel):
-                        entity_id = int(f"-100{entity.id}")
-                for g in groups:
-                    if g['chat_id'] == entity_id:
-                        target_chat_id = g['chat_id']
-                        target_title = g.get('title', 'Guruh')
-                        break
-            except Exception:
-                pass
+        async with auth_flow.user_client_scope(user_id, worker_mgr) as client:
+            if client:
+                try:
+                    entity = await client.get_entity(query)
+                    entity_id = entity.id
+                    if not str(entity_id).startswith("-100"):
+                        from telethon.tl.types import Channel
+                        if isinstance(entity, Channel):
+                            entity_id = int(f"-100{entity.id}")
+                    for g in groups:
+                        if g['chat_id'] == entity_id:
+                            target_chat_id = g['chat_id']
+                            target_title = g.get('title', 'Guruh')
+                            break
+                except Exception:
+                    pass
                 
     if not target_chat_id:
         await message.answer(f"⚠️ `{query}` nomli guruh ro'yxatingizda topilmadi.", parse_mode="Markdown")
