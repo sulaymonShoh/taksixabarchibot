@@ -296,6 +296,91 @@ async def update_payment_request_status(request_id: int, status: str):
         await db.execute('UPDATE payment_requests SET status = ? WHERE id = ?', (status, request_id))
         await db.commit()
 
+async def get_earnings_stats() -> Dict[str, Any]:
+    """Returns aggregated earnings metrics: total, this month, last month, and monthly breakdown."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        
+        # Total lifetime approved revenue & count
+        async with db.execute(
+            "SELECT COALESCE(SUM(amount_uzs), 0) as total_revenue, COUNT(*) as approved_count FROM payment_requests WHERE status = 'APPROVED'"
+        ) as cursor:
+            row = await cursor.fetchone()
+            total_revenue = row['total_revenue'] if row else 0
+            approved_count = row['approved_count'] if row else 0
+
+        # Current month revenue
+        async with db.execute(
+            """
+            SELECT COALESCE(SUM(amount_uzs), 0) as this_month
+            FROM payment_requests 
+            WHERE status = 'APPROVED' AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+            this_month = row['this_month'] if row else 0
+
+        # Previous month revenue
+        async with db.execute(
+            """
+            SELECT COALESCE(SUM(amount_uzs), 0) as last_month
+            FROM payment_requests 
+            WHERE status = 'APPROVED' AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now', '-1 month')
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+            last_month = row['last_month'] if row else 0
+
+        # Monthly breakdown for past 12 months
+        async with db.execute(
+            """
+            SELECT 
+                strftime('%Y-%m', created_at) as month,
+                COALESCE(SUM(amount_uzs), 0) as total_amount,
+                COUNT(*) as count
+            FROM payment_requests
+            WHERE status = 'APPROVED'
+            GROUP BY strftime('%Y-%m', created_at)
+            ORDER BY month DESC
+            LIMIT 12
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+            monthly_breakdown = [dict(r) for r in rows]
+
+        return {
+            "total_revenue": total_revenue,
+            "approved_count": approved_count,
+            "this_month": this_month,
+            "last_month": last_month,
+            "monthly_breakdown": monthly_breakdown
+        }
+
+async def get_payment_history(limit: int = 200) -> List[Dict[str, Any]]:
+    """Returns payment history joined with user details."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = """
+            SELECT 
+                p.id,
+                p.user_id,
+                p.plan_months,
+                p.amount_uzs,
+                p.receipt_file_id,
+                p.status,
+                p.created_at,
+                COALESCE(u.full_name, 'Noma''lum') as full_name,
+                u.username,
+                u.phone_number
+            FROM payment_requests p
+            LEFT JOIN users u ON p.user_id = u.user_id
+            ORDER BY p.created_at DESC
+            LIMIT ?
+        """
+        async with db.execute(query, (limit,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
 # ==================== GLOBAL SETTINGS ====================
 async def get_global_setting(key: str, default: Any = None) -> Any:
     async with aiosqlite.connect(DB_PATH) as db:

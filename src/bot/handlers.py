@@ -1153,3 +1153,27 @@ async def dismiss_call(call: CallbackQuery):
         await call.message.delete()
     await safe_answer(call)
 
+@router.message(Command("finance"))
+@router.message(Command("earnings"))
+async def admin_finance_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    stats = await db.get_earnings_stats()
+    
+    text = (
+        "💰 **Taksi Xabarchi — Moliyaviy Hisobot**\n\n"
+        f"💵 **Jami tushum:** `{stats['total_revenue']:,} so'm`\n"
+        f"📅 **Shu oy:** `{stats['this_month']:,} so'm`\n"
+        f"⏮ **O'tgan oy:** `{stats['last_month']:,} so'm`\n"
+        f"🧾 **Tasdiqlangan to'lovlar:** `{stats['approved_count']} ta`\n\n"
+        "📊 **Oylik taqsimot:**\n"
+    )
+    if stats['monthly_breakdown']:
+        for m in stats['monthly_breakdown'][:6]:
+            text += f"• `{m['month']}`: {m['total_amount']:,} so'm ({m['count']} ta chek)\n"
+    else:
+        text += "• Hozircha tasdiqlangan to'lovlar mavjud emas.\n"
+        
+    text += "\n🌐 Batafsil ma'lumot va cheklar tarixi veb-panelda: `/finance` sahifasida."
+    await message.answer(text, parse_mode="Markdown")
+

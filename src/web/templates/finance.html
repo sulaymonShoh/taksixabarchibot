@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %}Moliya & Daromad — Taksi Xabarchi{% endblock %}
+{% block content %}
+<div class="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-8">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <h2 class="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Moliya & Daromad Statistikasi</h2>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Platformadan kelib tushgan to'lovlar tarixi va oylik daromad dinamikasi</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <span class="text-xs font-semibold px-3.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shadow-xs">
+                <i class="fa-solid fa-circle-check mr-1.5"></i> Jami: <strong>{{ earnings.approved_count }}</strong> ta tasdiqlangan to'lov
+            </span>
+        </div>
+    </div>
+
+    <!-- Financial KPI Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <!-- Total Lifetime Revenue -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-5 backdrop-blur-sm shadow-sm dark:shadow-xl">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Jami Daromad</span>
+                <div class="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20">
+                    <i class="fa-solid fa-wallet text-sm"></i>
+                </div>
+            </div>
+            <div class="mt-4">
+                <div class="text-2xl lg:text-3xl font-bold text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
+                    {{ "{:,}".format(earnings.total_revenue) }} <span class="text-xs font-sans text-slate-500 font-normal">so'm</span>
+                </div>
+                <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Barcha tasdiqlangan to'lovlar</div>
+            </div>
+        </div>
+
+        <!-- This Month Revenue -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-5 backdrop-blur-sm shadow-sm dark:shadow-xl">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Shu Oy Daromadi</span>
+                <div class="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20">
+                    <i class="fa-solid fa-calendar-check text-sm"></i>
+                </div>
+            </div>
+            <div class="mt-4">
+                <div class="text-2xl lg:text-3xl font-bold text-amber-600 dark:text-amber-400 font-mono tracking-tight">
+                    {{ "{:,}".format(earnings.this_month) }} <span class="text-xs font-sans text-slate-500 font-normal">so'm</span>
+                </div>
+                <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Joriy oyda kelib tushgan summa</div>
+            </div>
+        </div>
+
+        <!-- Last Month Revenue -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-5 backdrop-blur-sm shadow-sm dark:shadow-xl">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">O'tgan Oy Daromadi</span>
+                <div class="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-500/20">
+                    <i class="fa-solid fa-clock-rotate-left text-sm"></i>
+                </div>
+            </div>
+            <div class="mt-4">
+                <div class="text-2xl lg:text-3xl font-bold text-slate-900 dark:text-white font-mono tracking-tight">
+                    {{ "{:,}".format(earnings.last_month) }} <span class="text-xs font-sans text-slate-500 font-normal">so'm</span>
+                </div>
+                <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Avvalgi oydagi tushum</div>
+            </div>
+        </div>
+
+        <!-- Approved Payments Count -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-5 backdrop-blur-sm shadow-sm dark:shadow-xl">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Muvaffaqiyatli Cheklar</span>
+                <div class="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center border border-purple-500/20">
+                    <i class="fa-solid fa-receipt text-sm"></i>
+                </div>
+            </div>
+            <div class="mt-4">
+                <div class="text-2xl lg:text-3xl font-bold text-purple-600 dark:text-purple-400 font-mono tracking-tight">
+                    {{ earnings.approved_count }} <span class="text-xs font-sans text-slate-500 font-normal">ta</span>
+                </div>
+                <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Sotilgan obunalar soni</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monthly Breakdown Section -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 backdrop-blur-sm shadow-sm dark:shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+            <div>
+                <h3 class="font-bold text-lg text-slate-900 dark:text-white">Oylik Daromad Dinamikasi</h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Oxirgi 12 oylik daromad va faoliyat taqsimoti</p>
+            </div>
+            <span class="text-xs font-mono text-slate-500">So'nggi 12 oy</span>
+        </div>
+
+        {% if earnings.monthly_breakdown %}
+        <div class="space-y-3 pt-2">
+            {% for m in earnings.monthly_breakdown %}
+            {% set pct = ((m.total_amount / max_month_amount) * 100)|round|int %}
+            <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800/80 space-y-2">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-sm">
+                    <div class="flex items-center space-x-2.5">
+                        <span class="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold text-xs font-mono border border-amber-500/20">
+                            {{ m.month }}
+                        </span>
+                        <span class="text-xs text-slate-500 dark:text-slate-400">
+                            <strong>{{ m.count }}</strong> ta to'lov tasdiqlangan
+                        </span>
+                    </div>
+                    <div class="text-base font-bold text-slate-900 dark:text-white font-mono">
+                        {{ "{:,}".format(m.total_amount) }} so'm
+                    </div>
+                </div>
+                <!-- Visual Bar -->
+                <div class="w-full h-2.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div class="h-full bg-gradient-to-r from-amber-500 to-emerald-500 rounded-full transition-all duration-500" 
+                         style="width: {{ pct if pct > 4 else 4 }}%;"></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="p-8 text-center text-slate-500">
+            <i class="fa-solid fa-chart-simple text-3xl mb-2 text-slate-400"></i>
+            <p class="text-sm font-semibold">Hozircha oylik to'lovlar mavjud emas</p>
+            <p class="text-xs text-slate-400 mt-1">Foydalanuvchilar chek yuborib, siz tasdiqlashingiz bilan daromad shu yerda jamlanadi.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Complete Payment History Table -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl overflow-hidden backdrop-blur-sm shadow-sm dark:shadow-xl space-y-4 p-6">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <h3 class="font-bold text-lg text-slate-900 dark:text-white">Barcha To'lovlar Tarixi</h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Barcha yuborilgan, tasdiqlangan va rad etilgan cheklar reyestri</p>
+            </div>
+            
+            <!-- Filter Bar -->
+            <div class="flex flex-wrap items-center gap-3">
+                <input type="text" id="historySearch" oninput="applyHistoryFilters()" placeholder="Mijoz, ID yoki chek #..." 
+                       class="px-3.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500 transition w-48 sm:w-56">
+                
+                <select id="historyStatus" onchange="applyHistoryFilters()" 
+                        class="px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 transition cursor-pointer">
+                    <option value="all">Barcha holatlar</option>
+                    <option value="APPROVED">✅ Tasdiqlangan</option>
+                    <option value="PENDING">⏳ Kutilmoqda</option>
+                    <option value="REJECTED">❌ Rad etilgan</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto custom-scrollbar -mx-6">
+            <table class="w-full text-left text-sm" id="historyTable">
+                <thead>
+                    <tr class="bg-slate-100/80 dark:bg-slate-900/80 text-slate-600 dark:text-slate-400 border-y border-slate-200 dark:border-slate-800 text-xs uppercase">
+                        <th class="py-3 px-6 font-semibold">Chek #ID</th>
+                        <th class="py-3 px-4 font-semibold">Mijoz (Ism / ID)</th>
+                        <th class="py-3 px-4 font-semibold">Tarif</th>
+                        <th class="py-3 px-4 font-semibold">Summa</th>
+                        <th class="py-3 px-4 font-semibold">Chek Rasmi</th>
+                        <th class="py-3 px-4 font-semibold">Holat</th>
+                        <th class="py-3 px-6 font-semibold text-right">Vaqt</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60" id="historyTbody">
+                    {% for p in history %}
+                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition history-row"
+                        data-id="{{ p.id }}"
+                        data-user-id="{{ p.user_id }}"
+                        data-name="{{ (p.full_name or '')|lower }}"
+                        data-username="{{ (p.username or '')|lower }}"
+                        data-status="{{ p.status }}">
+                        <td class="py-3.5 px-6 font-bold text-slate-900 dark:text-white font-mono">
+                            #{{ p.id }}
+                        </td>
+                        <td class="py-3.5 px-4">
+                            <div class="font-semibold text-slate-900 dark:text-white">{{ p.full_name }}</div>
+                            <div class="text-xs text-slate-500 dark:text-slate-400">ID: <span class="font-mono text-slate-700 dark:text-slate-300 font-medium">{{ p.user_id }}</span> {% if p.username %}• <span class="text-amber-600 dark:text-amber-400">@{{ p.username }}</span>{% endif %}</div>
+                        </td>
+                        <td class="py-3.5 px-4 text-xs font-semibold text-amber-600 dark:text-amber-400">
+                            {{ p.plan_months }} Oy
+                        </td>
+                        <td class="py-3.5 px-4 text-sm font-mono font-bold text-slate-900 dark:text-white">
+                            {{ "{:,}".format(p.amount_uzs) }} so'm
+                        </td>
+                        <td class="py-3.5 px-4">
+                            <button onclick="openPhotoModal('/api/receipt-photo/{{ p.id }}', 'Chek #{{ p.id }} — {{ p.full_name }}')" 
+                                    class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer">
+                                <i class="fa-solid fa-image mr-1.5 text-amber-500"></i> Ko'rish
+                            </button>
+                        </td>
+                        <td class="py-3.5 px-4 text-xs">
+                            {% if p.status == 'APPROVED' %}
+                            <span class="px-2.5 py-1 rounded-full font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                ✅ Tasdiqlangan
+                            </span>
+                            {% elif p.status == 'PENDING' %}
+                            <span class="px-2.5 py-1 rounded-full font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                ⏳ Kutilmoqda
+                            </span>
+                            {% else %}
+                            <span class="px-2.5 py-1 rounded-full font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                                ❌ Rad etilgan
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3.5 px-6 text-right text-xs font-mono text-slate-500 dark:text-slate-400">
+                            {{ p.created_at }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div id="noHistoryResults" class="hidden p-12 text-center text-slate-500">
+                <i class="fa-solid fa-receipt text-3xl mb-2 text-slate-400"></i>
+                <p class="text-sm font-semibold">Qidiruv bo'yicha cheklar topilmadi</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Photo Lightbox Modal -->
+<div id="photoModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4 transition-all">
+    <div class="relative max-w-2xl w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+        <div class="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <h3 class="font-bold text-sm text-slate-900 dark:text-white" id="modalTitle">Chek Rasmi</h3>
+            <button onclick="closePhotoModal()" class="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition cursor-pointer">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="p-4 flex-1 overflow-auto flex items-center justify-center bg-slate-100 dark:bg-slate-950">
+            <img id="modalImg" src="" alt="Chek" class="max-w-full max-h-[70vh] object-contain rounded-lg shadow-md">
+        </div>
+        <div class="p-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
+            <a id="downloadLink" href="" target="_blank" download class="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl transition flex items-center">
+                <i class="fa-solid fa-arrow-down mr-1.5"></i> Yuklab olish
+            </a>
+            <button onclick="closePhotoModal()" class="px-3.5 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl hover:bg-slate-300 dark:hover:bg-slate-700 transition cursor-pointer">
+                Yopish
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+function applyHistoryFilters() {
+    const query = document.getElementById("historySearch").value.trim().toLowerCase();
+    const status = document.getElementById("historyStatus").value;
+    const rows = Array.from(document.querySelectorAll(".history-row"));
+    
+    let visible = 0;
+    rows.forEach(row => {
+        const id = (row.getAttribute("data-id") || "").toLowerCase();
+        const userId = (row.getAttribute("data-user-id") || "").toLowerCase();
+        const name = (row.getAttribute("data-name") || "").toLowerCase();
+        const username = (row.getAttribute("data-username") || "").toLowerCase();
+        const rowStatus = row.getAttribute("data-status") || "";
+        
+        const matchQuery = !query || id.includes(query) || userId.includes(query) || name.includes(query) || username.includes(query);
+        const matchStatus = status === "all" || rowStatus === status;
+        
+        if (matchQuery && matchStatus) {
+            row.style.display = "";
+            visible++;
+        } else {
+            row.style.display = "none";
+        }
+    });
+    
+    const noRes = document.getElementById("noHistoryResults");
+    if (noRes) noRes.classList.toggle("hidden", visible > 0);
+}
+
+function openPhotoModal(imgSrc, title) {
+    document.getElementById("modalImg").src = imgSrc;
+    document.getElementById("modalTitle").textContent = title;
+    document.getElementById("downloadLink").href = imgSrc;
+    const modal = document.getElementById("photoModal");
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+}
+
+function closePhotoModal() {
+    const modal = document.getElementById("photoModal");
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+}
+
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closePhotoModal();
+});
+</script>
+{% endblock %}

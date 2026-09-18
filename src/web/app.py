@@ -79,12 +79,15 @@ async def dashboard_view(request: Request, username: str = Depends(verify_creden
                 
     worker_mgr = getattr(request.app.state, 'worker_manager', None)
     running_workers = len(worker_mgr.active_workers) if worker_mgr else 0
+    earnings = await db.get_earnings_stats()
 
     stats = {
         "total_users": len(users),
         "active_subscribers": active_subs,
         "running_workers": running_workers,
-        "pending_payments": len(pending)
+        "pending_payments": len(pending),
+        "total_revenue": earnings.get("total_revenue", 0),
+        "this_month_revenue": earnings.get("this_month", 0)
     }
     
     enriched_users = [enrich_user_data(u) for u in users[:10]]
@@ -92,6 +95,7 @@ async def dashboard_view(request: Request, username: str = Depends(verify_creden
     return templates.TemplateResponse(request=request, name="dashboard.html", context={
         "active_page": "dashboard",
         "stats": stats,
+        "earnings": earnings,
         "recent_users": enriched_users,
         "recent_payments": pending[:5],
         "pending_count": len(pending)
@@ -156,6 +160,29 @@ async def broadcast_view(request: Request, username: str = Depends(verify_creden
         "active_page": "broadcast",
         "pending_count": len(pending)
     })
+
+@app.get("/finance", response_class=HTMLResponse)
+async def finance_view(request: Request, username: str = Depends(verify_credentials)):
+    earnings = await db.get_earnings_stats()
+    history = await db.get_payment_history(limit=250)
+    pending = await db.get_pending_payment_requests()
+    
+    # Max month amount for visual bar scaling
+    max_month_amount = max([m['total_amount'] for m in earnings['monthly_breakdown']] or [1])
+    if max_month_amount <= 0:
+        max_month_amount = 1
+        
+    return templates.TemplateResponse(request=request, name="finance.html", context={
+        "active_page": "finance",
+        "earnings": earnings,
+        "history": history,
+        "max_month_amount": max_month_amount,
+        "pending_count": len(pending)
+    })
+
+@app.get("/api/finance/stats")
+async def api_finance_stats(username: str = Depends(verify_credentials)):
+    return JSONResponse(await db.get_earnings_stats())
 
 @app.get("/miniapp", response_class=HTMLResponse)
 async def miniapp_view(request: Request):

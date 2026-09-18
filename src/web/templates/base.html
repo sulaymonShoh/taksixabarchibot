@@ -81,6 +81,10 @@
                 <span class="ml-auto bg-amber-500 text-slate-950 text-xs font-bold px-2 py-0.5 rounded-full shadow-sm">{{ pending_count }}</span>
                 {% endif %}
             </a>
+            <a href="/finance" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition {% if active_page == 'finance' %}bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white{% endif %}">
+                <i class="fa-solid fa-chart-line w-5 text-center"></i>
+                <span>Moliya & Daromad</span>
+            </a>
             <a href="/broadcast" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition {% if active_page == 'broadcast' %}bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold{% else %}text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white{% endif %}">
                 <i class="fa-solid fa-bullhorn w-5 text-center"></i>
                 <span>Ommaviy Xabar</span>

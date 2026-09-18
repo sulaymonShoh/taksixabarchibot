@@ -100,6 +100,20 @@ def test_web_suite():
     assert res_photo.status_code in [404, 503]
     print(">>> 11. [PASS] Receipt photo endpoint verified.")
 
+    # 12. Finance view and API stats
+    res_fin = client.get("/finance", auth=auth)
+    assert res_fin.status_code == 200
+    assert "Moliya & Daromad Statistikasi" in res_fin.text
+    assert "Jami Daromad" in res_fin.text
+    print(">>> 12. [PASS] Finance view rendered with KPI cards and monthly breakdown.")
+
+    res_fin_api = client.get("/api/finance/stats", auth=auth)
+    assert res_fin_api.status_code == 200
+    stats_data = res_fin_api.json()
+    assert "total_revenue" in stats_data
+    assert "monthly_breakdown" in stats_data
+    print(">>> 13. [PASS] Finance stats API verified.")
+
     if os.path.exists("data/test_web_suite.db"):
         os.remove("data/test_web_suite.db")
 
