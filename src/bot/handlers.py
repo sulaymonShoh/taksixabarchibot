@@ -682,25 +682,25 @@ async def manage_groups_call(call: CallbackQuery, bot: Bot):
             try:
                 from telethon.tl.types import Channel, Chat
                 dialogs = await client.get_dialogs()
-            settings = await db.get_user_settings(user_id)
-            source_chat_id = settings.get("source_chat_id")
-            
-            for d in dialogs:
-                if (d.is_group or d.is_channel) and d.id != source_chat_id:
-                    is_valid = False
-                    if getattr(d.entity, 'megagroup', False) or isinstance(d.entity, Chat):
-                        is_valid = True
-                    if is_valid:
-                        username = getattr(d.entity, 'username', None)
-                        await db.add_or_update_user_group(
-                            user_id=user_id,
-                            chat_id=d.id,
-                            title=d.name,
-                            username=username,
-                            is_active=True
-                        )
-        except Exception as e:
-            logger.error(f"Error syncing dialogs for user {user_id}: {e}")
+                settings = await db.get_user_settings(user_id)
+                source_chat_id = settings.get("source_chat_id")
+                
+                for d in dialogs:
+                    if (d.is_group or d.is_channel) and d.id != source_chat_id:
+                        is_valid = False
+                        if getattr(d.entity, 'megagroup', False) or isinstance(d.entity, Chat):
+                            is_valid = True
+                        if is_valid:
+                            username = getattr(d.entity, 'username', None)
+                            await db.add_or_update_user_group(
+                                user_id=user_id,
+                                chat_id=d.id,
+                                title=d.name,
+                                username=username,
+                                is_active=True
+                            )
+            except Exception as e:
+                logger.error(f"Error syncing dialogs for user {user_id}: {e}")
             
     groups = await db.get_user_groups(user_id)
     with contextlib.suppress(TelegramBadRequest):
