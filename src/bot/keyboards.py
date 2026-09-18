@@ -2,27 +2,25 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import List, Dict, Any
 import math
 
-def main_dashboard_kb(is_running: bool, auto_cleanup: bool) -> InlineKeyboardMarkup:
+def main_dashboard_kb(is_running: bool, drop_author: bool) -> InlineKeyboardMarkup:
     state_btn = InlineKeyboardButton(
         text="⏸ To'xtatish (Pauza)" if is_running else "▶️ Boshlash (Aktiv)",
         callback_data="toggle_state"
     )
-    cleanup_btn = InlineKeyboardButton(
-        text="🧹 Avto-tozalash: YOQILGAN" if auto_cleanup else "🧹 Avto-tozalash: O'CHIRILGAN",
-        callback_data="toggle_cleanup"
+    forward_mode_btn = InlineKeyboardButton(
+        text="🔄 Rejim: Toza post (Muallifsiz)" if drop_author else "🔄 Rejim: Asl nusxa (Forwarded)",
+        callback_data="toggle_drop_author"
     )
     
     return InlineKeyboardMarkup(inline_keyboard=[
         [state_btn],
+        [InlineKeyboardButton(text="📥 Manba guruhni sozlash", callback_data="set_source_chat")],
         [
-            InlineKeyboardButton(text="👁 Xabarni ko'rish", callback_data="preview_message"),
-            InlineKeyboardButton(text="📝 Xabarni tahrirlash", callback_data="edit_message")
+            InlineKeyboardButton(text="⏱ Doira vaqti", callback_data="adjust_timing"),
+            InlineKeyboardButton(text="⚡️ Yuborish tezligi", callback_data="adjust_jitter")
         ],
-        [
-            InlineKeyboardButton(text="⏱ Vaqt oralig'i", callback_data="adjust_timing"),
-            InlineKeyboardButton(text="👥 Guruhlarni boshqarish", callback_data="manage_groups")
-        ],
-        [cleanup_btn],
+        [InlineKeyboardButton(text="👥 Guruhlarni boshqarish", callback_data="manage_groups")],
+        [forward_mode_btn],
         [InlineKeyboardButton(text="🧪 Sinov yuborish (Test)", callback_data="trigger_test")]
     ])
 
@@ -33,6 +31,15 @@ def timing_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚖️ O'rtacha (5 - 10 daqiqa)", callback_data="time_preset_med")],
         [InlineKeyboardButton(text="☕️ Sekin (10 - 15 daqiqa)", callback_data="time_preset_relax")],
         [InlineKeyboardButton(text="✍️ O'zingiz kiritish", callback_data="time_custom")],
+        [InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")]
+    ])
+
+def jitter_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚡️ Tezkor (1.5s - 2.0s) [50 guruh ~1.5 daq]", callback_data="jitter_preset_fast")],
+        [InlineKeyboardButton(text="⚖️ O'rtacha (2.0s - 4.0s)", callback_data="jitter_preset_med")],
+        [InlineKeyboardButton(text="🛡 Xavfsiz (6.0s - 12.0s)", callback_data="jitter_preset_safe")],
+        [InlineKeyboardButton(text="✍️ O'zingiz kiritish", callback_data="jitter_custom")],
         [InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")]
     ])
 

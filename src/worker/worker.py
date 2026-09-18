@@ -6,13 +6,10 @@ from telethon.errors import (
     SlowModeWaitError,
     UserBannedInChannelError,
     ChatWriteForbiddenError,
-    ChannelPrivateError,
-    MessageDeleteForbiddenError,
-    MessageIdInvalidError
+    ChannelPrivateError
 )
 from aiogram import Bot
 from src import database as db
-from src.worker.spintax import parse_spintax
 from src.config import ADMIN_ID
 from src.logger import setup_logger
 
@@ -48,40 +45,22 @@ class BroadcastWorker:
         except Exception as e:
             logger.error(f"Failed to send alert to admin: {e}")
 
-    async def safe_delete_message(self, chat_id: int, message_id: int):
-        try:
-            await self.client.delete_messages(chat_id, [message_id])
-            logger.info(f"Deleted old message {message_id} in {chat_id}")
-        except (MessageDeleteForbiddenError, MessageIdInvalidError) as e:
-            logger.warning(f"Could not delete message in {chat_id}: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error deleting message in {chat_id}: {e}")
-
-    async def process_group(self, group: dict, content: str, media_path: str, auto_cleanup: bool):
+    async def process_group(self, group: dict, source_chat_id: int, message_to_forward, drop_author: bool):
         chat_id = group['chat_id']
         title = group['title']
         group_display = format_group_display(group)
         
         try:
-            # 1. Cleanup old message
-            if auto_cleanup:
-                old_msg_id = await db.get_message_history(chat_id)
-                if old_msg_id:
-                    await self.safe_delete_message(chat_id, old_msg_id)
-            
-            # 2. Spintax Generation
-            final_text = parse_spintax(content)
-            
-            # 3. Transmission
-            if media_path:
-                msg = await self.client.send_file(chat_id, media_path, caption=final_text, parse_mode="html")
+            # Forward message from source chat
+            if drop_author:
+                # Copy / Send exact message without 'Forwarded from' header
+                await self.client.send_message(chat_id, message_to_forward)
             else:
-                msg = await self.client.send_message(chat_id, final_text, parse_mode="html")
+                # Standard native forward
+                await self.client.forward_messages(chat_id, message_to_forward.id, source_chat_id)
                 
-            # 4. Record Update
-            await db.set_message_history(chat_id, msg.id)
             await db.update_group_status(chat_id, "Healthy")
-            logger.info(f"Successfully posted to {title} ({chat_id})")
+            logger.info(f"Successfully forwarded to {title} ({chat_id})")
             
         except FloodWaitError as e:
             wait_time = e.seconds + 3
@@ -116,7 +95,6 @@ class BroadcastWorker:
         except ChannelPrivateError:
             logger.error(f"Channel {title} is private/kicked. Deactivating.")
             await db.update_group_status(chat_id, "Private/Kicked", is_active=False)
-            await db.clear_message_history(chat_id)
             await self.alert_admin(
                 f"🚫 **Guruhga kirish yo'qolgan (Kicked/Private)**\n\n"
                 f"👥 **Guruh:** {group_display}\n"
@@ -125,7 +103,7 @@ class BroadcastWorker:
             )
             
         except Exception as e:
-            logger.error(f"Failed to post to {title}: {e}")
+            logger.error(f"Failed to forward to {title}: {e}")
             await db.update_group_status(chat_id, f"Error: {str(e)[:50]}")
 
     async def run_loop(self):
@@ -144,36 +122,48 @@ class BroadcastWorker:
                     await self.alert_admin("🧪 **Sinov yuborish (Test round) boshlandi**")
 
                 if not is_running:
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(5)
                     continue
                     
+                source_chat_id = await db.get_setting("source_chat_id", None)
+                if not source_chat_id:
+                    logger.warning("No source chat configured. Sleeping.")
+                    await asyncio.sleep(15)
+                    continue
+                    
+                # Fetch latest message from source chat
+                try:
+                    messages = await self.client.get_messages(source_chat_id, limit=1)
+                    if not messages or not messages[0]:
+                        logger.warning("Source chat is empty. Sleeping.")
+                        await asyncio.sleep(15)
+                        continue
+                    latest_message = messages[0]
+                except Exception as e:
+                    logger.error(f"Error fetching latest message from source chat {source_chat_id}: {e}")
+                    await asyncio.sleep(15)
+                    continue
+
                 active_groups = await db.get_active_groups()
                 if not active_groups:
-                    logger.info("No active groups. Sleeping.")
-                    await asyncio.sleep(30)
+                    logger.info("No active target groups. Sleeping.")
+                    await asyncio.sleep(20)
                     continue
                     
-                content = await db.get_setting("content_text", "")
-                if not content:
-                    logger.info("No content set. Sleeping.")
-                    await asyncio.sleep(30)
-                    continue
-                    
-                media_path = await db.get_setting("media_path", None)
-                auto_cleanup = await db.get_setting("auto_cleanup", False)
-                jitter_min = await db.get_setting("jitter_min", 6)
-                jitter_max = await db.get_setting("jitter_max", 12)
-                cycle_min = await db.get_setting("cycle_min", 180)
-                cycle_max = await db.get_setting("cycle_max", 300)
+                drop_author = await db.get_setting("drop_author", False)
+                jitter_min = float(await db.get_setting("jitter_min", 1.5))
+                jitter_max = float(await db.get_setting("jitter_max", 2.0))
+                cycle_min = int(await db.get_setting("cycle_min", 60))
+                cycle_max = int(await db.get_setting("cycle_max", 90))
 
-                logger.info(f"Starting broadcast round to {len(active_groups)} groups.")
+                logger.info(f"Starting forward round to {len(active_groups)} groups from source chat {source_chat_id}.")
                 
                 for group in active_groups:
-                    await self.process_group(group, content, media_path, auto_cleanup)
+                    await self.process_group(group, source_chat_id, latest_message, drop_author)
                     
-                    # Human Simulation Delay (Jitter)
-                    delay = random.randint(jitter_min, jitter_max)
-                    logger.debug(f"Jitter delay: {delay}s")
+                    # Randomized Jitter Delay (Supports float seconds like 1.5s - 2.0s)
+                    delay = random.uniform(jitter_min, jitter_max)
+                    logger.debug(f"Jitter delay: {delay:.2f}s")
                     await asyncio.sleep(delay)
                 
                 if is_test:
@@ -190,4 +180,4 @@ class BroadcastWorker:
                 break
             except Exception as e:
                 logger.error(f"Critical error in worker loop: {e}", exc_info=True)
-                await asyncio.sleep(30)
+                await asyncio.sleep(20)

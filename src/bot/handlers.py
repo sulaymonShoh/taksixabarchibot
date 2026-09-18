@@ -1,7 +1,7 @@
 import os
 import contextlib
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -9,16 +9,15 @@ from aiogram.exceptions import TelegramBadRequest
 
 from src import database as db
 from src.bot import keyboards as kb
-from src.config import MEDIA_DIR, DEFAULT_CYCLE_MIN, DEFAULT_CYCLE_MAX, DEFAULT_JITTER_MIN, DEFAULT_JITTER_MAX
-from src.worker.spintax import parse_spintax
 from src.logger import setup_logger
 
 logger = setup_logger("handlers")
 router = Router()
 
 class BotStates(StatesGroup):
-    waiting_for_message = State()
+    waiting_for_source_chat = State()
     waiting_for_custom_timing = State()
+    waiting_for_custom_jitter = State()
 
 async def safe_answer(call: CallbackQuery, text: str = None, show_alert: bool = False):
     """Safely answer callback queries ignoring timeout/invalid query errors."""
@@ -30,38 +29,37 @@ async def render_dashboard(message_or_call, state: FSMContext = None):
         await state.clear()
         
     is_running = await db.get_setting("is_running", False)
-    auto_cleanup = await db.get_setting("auto_cleanup", False)
+    source_chat_id = await db.get_setting("source_chat_id", None)
+    source_chat_title = await db.get_setting("source_chat_title", "O'rnatilmagan")
+    drop_author = await db.get_setting("drop_author", False)
     
-    cycle_min = await db.get_setting("cycle_min", DEFAULT_CYCLE_MIN)
-    cycle_max = await db.get_setting("cycle_max", DEFAULT_CYCLE_MAX)
-    jitter_min = await db.get_setting("jitter_min", DEFAULT_JITTER_MIN)
-    jitter_max = await db.get_setting("jitter_max", DEFAULT_JITTER_MAX)
+    cycle_min = await db.get_setting("cycle_min", 60)
+    cycle_max = await db.get_setting("cycle_max", 90)
+    jitter_min = await db.get_setting("jitter_min", 1.5)
+    jitter_max = await db.get_setting("jitter_max", 2.0)
     
     groups = await db.get_all_groups()
     active_groups = len([g for g in groups if g['is_active']])
     total_groups = len(groups)
     
-    content = await db.get_setting("content_text", "Xabar hali o'rnatilmagan.")
-    media_path = await db.get_setting("media_path", None)
+    source_display = f"📢 **{source_chat_title}**" if source_chat_id else "⚠️ **O'rnatilmagan (Ulash zarur!)**"
+    forward_mode_text = "Toza post (Muallifsiz / Original)" if drop_author else "Asl nusxa (Forwarded from...)"
     
-    # Truncate content for dashboard preview snippet
-    preview_snippet = content
-    if len(preview_snippet) > 100:
-        preview_snippet = preview_snippet[:97] + "..."
-        
+    # Calculate estimated round duration
+    est_seconds = active_groups * ((float(jitter_min) + float(jitter_max)) / 2)
+    est_minutes = est_seconds / 60
+    
     text = (
         "🎛 **Xabarlar Tarqatish Boshqaruv Paneli**\n\n"
         f"**Holat:** {'🟢 FAOL (Ishlayapti)' if is_running else '🔴 TO\'XTATILGAN (Pauza)'}\n"
-        f"**Guruhlar:** {active_groups} ta Faol / {total_groups} ta Jami\n"
-        f"**Doira oralig'i:** {cycle_min}s - {cycle_max}s\n"
-        f"**Yuborish tezligi (Jitter):** {jitter_min}s - {jitter_max}s\n"
-        f"**Oldingi xabarni tozalash:** {'YOQILGAN' if auto_cleanup else 'O\'CHIRILGAN'}\n\n"
-        "**📝 O'rnatilgan xabar:**\n"
-        f"_{preview_snippet}_\n"
-        f"*{'🖼 Rasm/Video biriktirilgan' if media_path else 'Faqat matn'}*"
+        f"**📥 Manba guruh:** {source_display}\n"
+        f"**🔄 Forward rejimi:** {forward_mode_text}\n"
+        f"**👥 Guruhlar:** {active_groups} ta Faol / {total_groups} ta Jami\n"
+        f"**⏱ Doira oralig'i:** {cycle_min}s - {cycle_max}s\n"
+        f"**⚡️ Yuborish tezligi (Jitter):** {jitter_min}s - {jitter_max}s (~{est_minutes:.1f} daqiqada {active_groups} ta guruh)\n"
     )
     
-    markup = kb.main_dashboard_kb(is_running, auto_cleanup)
+    markup = kb.main_dashboard_kb(is_running, drop_author)
     
     if isinstance(message_or_call, Message):
         await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
@@ -82,54 +80,98 @@ async def back_dashboard_call(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "toggle_state")
 async def toggle_state_call(call: CallbackQuery):
     is_running = await db.get_setting("is_running", False)
+    source_chat_id = await db.get_setting("source_chat_id", None)
+    
+    if not is_running and not source_chat_id:
+        await safe_answer(call, "Avval 'Manba guruhni sozlash' tugmasi orqali xabar olinadigan guruhni ulang!", show_alert=True)
+        return
+        
     await db.set_setting("is_running", not is_running)
     await render_dashboard(call)
     await safe_answer(call, "Holat o'zgartirildi!")
 
-@router.callback_query(F.data == "toggle_cleanup")
-async def toggle_cleanup_call(call: CallbackQuery):
-    auto_cleanup = await db.get_setting("auto_cleanup", False)
-    await db.set_setting("auto_cleanup", not auto_cleanup)
+@router.callback_query(F.data == "toggle_drop_author")
+async def toggle_drop_author_call(call: CallbackQuery):
+    drop_author = await db.get_setting("drop_author", False)
+    await db.set_setting("drop_author", not drop_author)
     await render_dashboard(call)
-    await safe_answer(call, "Avto-tozalash sozlamasi o'zgartirildi!")
+    await safe_answer(call, "Forward rejimi o'zgartirildi!")
 
-# Message Preview Handler
-@router.callback_query(F.data == "preview_message")
-async def preview_message_call(call: CallbackQuery, bot: Bot):
-    content = await db.get_setting("content_text", "")
-    media_path = await db.get_setting("media_path", None)
-    
-    if not content and not media_path:
-        await safe_answer(call, "Xabar hali o'rnatilmagan! Avval 'Xabarni tahrirlash' tugmasini bosing.", show_alert=True)
-        return
-        
-    await safe_answer(call, "Xabar namunasi tayyorlanmoqda...")
-    
-    # Parse spintax to show a live variation
-    sample_text = parse_spintax(content) if content else ""
-    
-    try:
-        await call.message.answer("👁 **Guruhlarda ko'rinadigan xabar namunasi (Spintax varianti bilan):**", parse_mode="Markdown")
-        
-        if media_path and os.path.exists(media_path):
-            ext = media_path.split('.')[-1].lower()
-            file = FSInputFile(media_path)
-            if ext in ['mp4', 'mov', 'avi', 'mkv']:
-                await bot.send_video(call.from_user.id, file, caption=sample_text, parse_mode="HTML")
-            else:
-                await bot.send_photo(call.from_user.id, file, caption=sample_text, parse_mode="HTML")
-        else:
-            await bot.send_message(call.from_user.id, sample_text, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Error sending preview: {e}")
-        await call.message.answer(f"⚠️ Xabarni ko'rsatishda xatolik yuz berdi: {e}")
+# ==================== SOURCE CHAT SETUP ====================
+@router.callback_query(F.data == "set_source_chat")
+async def set_source_chat_call(call: CallbackQuery, state: FSMContext):
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(
+            "📥 **Manba guruhni sozlash**\n\n"
+            "Xabarlar qaysi guruh yoki kanaldan olinib tarqatilishi kerak?\n\n"
+            "👉 O'sha guruh/kanaldagi **biron bir xabarni to'g'ridan-to'g'ri ushbu botga Forward (Uzatish)** qilib yuboring,\n"
+            "yoki guruhning `@username` yoki `https://t.me/...` havolasini yuboring.\n\n"
+            "*(Bot har doim o'sha guruhdagi eng oxirgi yuborilgan yangi xabarni avtomatik oladi)*",
+            reply_markup=kb.back_kb(),
+            parse_mode="Markdown"
+        )
+    await state.set_state(BotStates.waiting_for_source_chat)
+    await safe_answer(call)
 
+@router.message(BotStates.waiting_for_source_chat)
+async def process_source_chat_input(message: Message, state: FSMContext, bot: Bot):
+    worker_client = getattr(bot, 'worker_client', None)
+    source_chat_id = None
+    source_chat_title = None
+    
+    # 1. Check if user forwarded a message
+    if message.forward_from_chat:
+        source_chat_id = message.forward_from_chat.id
+        source_chat_title = message.forward_from_chat.title or f"Chat {source_chat_id}"
+    
+    # 2. Check if user sent a link or @username
+    elif message.text and (message.text.startswith("@") or "t.me/" in message.text or message.text.startswith("-100")):
+        if not worker_client:
+            await message.answer("⚠️ Worker akkaunti ulanmagan.", reply_markup=kb.back_kb())
+            return
+        try:
+            entity_input = message.text.strip()
+            if entity_input.startswith("-100"):
+                entity_input = int(entity_input)
+            entity = await worker_client.get_entity(entity_input)
+            source_chat_id = entity.id
+            source_chat_title = getattr(entity, 'title', f"Chat {entity.id}")
+            if not str(source_chat_id).startswith("-100"):
+                from telethon.tl.types import Channel
+                if isinstance(entity, Channel):
+                    source_chat_id = int(f"-100{entity.id}")
+        except Exception as e:
+            logger.error(f"Error resolving source chat: {e}")
+            await message.answer(
+                f"⚠️ Guruhni havola orqali aniqlab bo'lmadi.\nIltimos, guruhdan birorta xabarni to'g'ridan-to'g'ri Forward (Uzatish) qilib yuboring!",
+                reply_markup=kb.back_kb()
+            )
+            return
+            
+    if source_chat_id:
+        await db.set_setting("source_chat_id", source_chat_id)
+        await db.set_setting("source_chat_title", source_chat_title)
+        await message.answer(
+            f"✅ **Manba guruh muvaffaqiyatli ulandi!**\n\n"
+            f"📢 **Nomi:** {source_chat_title}\n"
+            f"🆔 **ID:** `{source_chat_id}`\n\n"
+            f"Endi ushbu guruhga yangi e'lon yozsangiz, bot har bir aylanmada o'sha eng oxirgi xabarni barcha guruhlarga tarqatadi!",
+            parse_mode="Markdown"
+        )
+        await render_dashboard(message, state)
+    else:
+        await message.answer(
+            "⚠️ Noma'lum format. Iltimos, manba guruhingizdan birorta xabarni botga Forward qilib yuboring!",
+            reply_markup=kb.back_kb()
+        )
+
+# ==================== TIMING CONFIGURATION ====================
 @router.callback_query(F.data == "adjust_timing")
 async def adjust_timing_call(call: CallbackQuery):
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_text(
-            "⏱ **Vaqt oralig'ini sozlash**\n\n"
-            "Guruhlarga xabar tarqatish doiralari (har bir to'liq aylanma) orasidagi kutish vaqtini tanlang:",
+            "⏱ **Doira oralig'ini sozlash (Round Cooldown)**\n\n"
+            "Barcha guruhlarga xabar yuborib bo'lingach, keyingi to'liq aylanmagacha bo'lgan kutish vaqti:",
             reply_markup=kb.timing_kb(),
             parse_mode="Markdown"
         )
@@ -154,14 +196,14 @@ async def time_preset_call(call: CallbackQuery):
     await db.set_setting("cycle_min", c_min)
     await db.set_setting("cycle_max", c_max)
     await render_dashboard(call)
-    await safe_answer(call, f"Vaqt sozlandi: {label}")
+    await safe_answer(call, f"Doira vaqti sozlandi: {label}")
 
 @router.callback_query(F.data == "time_custom")
 async def time_custom_call(call: CallbackQuery, state: FSMContext):
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_text(
-            "✍️ **O'zingiz vaqt kiriting**\n\n"
-            "Minimal va maksimal kutish vaqtini soniyalarda probel bilan yuboring.\n"
+            "✍️ **O'zingiz doira vaqtini kiriting**\n\n"
+            "Doiralar orasidagi minimal va maksimal kutish vaqtini (soniyalarda) probel bilan yuboring.\n"
             "Masalan: `60 90` yoki `180 300`",
             reply_markup=kb.back_kb(),
             parse_mode="Markdown"
@@ -188,60 +230,69 @@ async def process_custom_timing(message: Message, state: FSMContext):
             reply_markup=kb.back_kb()
         )
 
-@router.callback_query(F.data == "edit_message")
-async def edit_message_call(call: CallbackQuery, state: FSMContext):
+# ==================== JITTER CONFIGURATION ====================
+@router.callback_query(F.data == "adjust_jitter")
+async def adjust_jitter_call(call: CallbackQuery):
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_text(
-            "📝 **Tarqatiladigan xabarni tahrirlash**\n\n"
-            "Yangi matnni yuboring (Spintax variantlaridan foydalanishingiz mumkin, masalan: `{Salom|Assalomu alaykum}` va formatlash teglari).\n\n"
-            "Agar rasm yoki video qo'shmoqchi bo'lsangiz, uni izoh (caption) bilan birga to'g'ridan-to'g'ri botga yuboring.\n\n"
-            "_Eslatma: Yangi media yuborilsa, avvalgi media fayl yangilanadi._",
+            "⚡️ **Yuborish tezligini sozlash (Send Jitter)**\n\n"
+            "Bitta guruhga yuborilgach, keyingi guruhga yuborishgacha bo'lgan oraliq kutish vaqti:",
+            reply_markup=kb.jitter_kb(),
+            parse_mode="Markdown"
+        )
+    await safe_answer(call)
+
+@router.callback_query(F.data.startswith("jitter_preset_"))
+async def jitter_preset_call(call: CallbackQuery):
+    preset = call.data.split("_")[2]
+    if preset == "fast":
+        j_min, j_max = 1.5, 2.0
+        label = "⚡️ Tezkor (1.5s - 2.0s)"
+    elif preset == "med":
+        j_min, j_max = 2.0, 4.0
+        label = "⚖️ O'rtacha (2.0s - 4.0s)"
+    elif preset == "safe":
+        j_min, j_max = 6.0, 12.0
+        label = "🛡 Xavfsiz (6.0s - 12.0s)"
+        
+    await db.set_setting("jitter_min", j_min)
+    await db.set_setting("jitter_max", j_max)
+    await render_dashboard(call)
+    await safe_answer(call, f"Yuborish tezligi: {label}")
+
+@router.callback_query(F.data == "jitter_custom")
+async def jitter_custom_call(call: CallbackQuery, state: FSMContext):
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(
+            "✍️ **O'zingiz yuborish tezligini kiriting**\n\n"
+            "Har bir guruh orasidagi minimal va maksimal vaqtni (soniyalarda) probel bilan kiriting.\n"
+            "Masalan: `1.5 2.0` yoki `2 4`",
             reply_markup=kb.back_kb(),
             parse_mode="Markdown"
         )
-    await state.set_state(BotStates.waiting_for_message)
+    await state.set_state(BotStates.waiting_for_custom_jitter)
     await safe_answer(call)
 
-@router.message(BotStates.waiting_for_message)
-async def process_new_message(message: Message, state: FSMContext, bot: Bot):
-    text = ""
-    media_path = None
-    
-    # Process text/caption
-    if message.text:
-        text = message.html_text
-    elif message.caption:
-        text = message.html_text
-        
-    # Process media
-    if message.photo:
-        photo = message.photo[-1]
-        file_id = photo.file_id
-        file_info = await bot.get_file(file_id)
-        ext = file_info.file_path.split('.')[-1]
-        media_path = os.path.join(MEDIA_DIR, f"broadcast_media.{ext}")
-        await bot.download_file(file_info.file_path, media_path)
-        
-    elif message.video:
-        file_id = message.video.file_id
-        file_info = await bot.get_file(file_id)
-        ext = file_info.file_path.split('.')[-1]
-        media_path = os.path.join(MEDIA_DIR, f"broadcast_media.{ext}")
-        await bot.download_file(file_info.file_path, media_path)
-    
-    # If it's pure text, clear media path
-    if not message.photo and not message.video:
-        old_path = await db.get_setting("media_path")
-        if old_path and os.path.exists(old_path):
-            os.remove(old_path)
+@router.message(BotStates.waiting_for_custom_jitter)
+async def process_custom_jitter(message: Message, state: FSMContext):
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 2:
+            raise ValueError()
+        j_min, j_max = float(parts[0]), float(parts[1])
+        if j_min < 0.5 or j_max < j_min:
+            raise ValueError()
             
-    await db.set_setting("content_text", text)
-    await db.set_setting("media_path", media_path)
-    
-    await message.answer("✅ Xabar muvaffaqiyatli saqlandi!")
-    await render_dashboard(message, state)
+        await db.set_setting("jitter_min", j_min)
+        await db.set_setting("jitter_max", j_max)
+        await render_dashboard(message, state)
+    except ValueError:
+        await message.answer(
+            "⚠️ Noto'g'ri format. Iltimos, ikkita son kiriting (kamida 0.5), masalan: `1.5 2.0` yoki `2 4`.",
+            reply_markup=kb.back_kb()
+        )
 
-# Group Management
+# ==================== GROUP MANAGEMENT ====================
 @router.callback_query(F.data == "manage_groups")
 async def manage_groups_call(call: CallbackQuery, bot: Bot):
     worker_client = getattr(bot, 'worker_client', None)
@@ -255,9 +306,10 @@ async def manage_groups_call(call: CallbackQuery, bot: Bot):
     try:
         from telethon.tl.types import Channel, Chat
         dialogs = await worker_client.get_dialogs()
-        group_count = 0
+        source_chat_id = await db.get_setting("source_chat_id", None)
+        
         for d in dialogs:
-            if d.is_group or d.is_channel:
+            if (d.is_group or d.is_channel) and d.id != source_chat_id:
                 is_valid = False
                 if getattr(d.entity, 'megagroup', False):
                     is_valid = True
@@ -272,14 +324,13 @@ async def manage_groups_call(call: CallbackQuery, bot: Bot):
                         username=username,
                         is_active=True
                     )
-                    group_count += 1
                     
         groups = await db.get_all_groups()
         with contextlib.suppress(TelegramBadRequest):
             await call.message.edit_text(
                 f"👥 **Guruhlarni Boshqarish**\n"
                 f"Jami {len(groups)} ta guruh topildi.\n"
-                "Xabar yuboriladigan guruhlarni belgilang (✅ - faol, ⬜️ - o'chirilgan):",
+                "Xabar tarqatiladigan guruhlarni belgilang (✅ - faol, ⬜️ - o'chirilgan):",
                 reply_markup=kb.paginated_groups_kb(groups, 0)
             )
     except Exception as e:
@@ -330,21 +381,23 @@ async def toggle_group_call(call: CallbackQuery):
         new_status = not target['is_active']
         await db.update_group_status(chat_id, target['status'], is_active=new_status)
         
-    # Refresh list
     groups = await db.get_all_groups()
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_reply_markup(reply_markup=kb.paginated_groups_kb(groups, page))
     await safe_answer(call)
 
-# Forward Inspector for Quick Add
-# Forward Inspector for Quick Add
+# ==================== QUICK TARGET GROUP ADD ====================
 @router.message(F.forward_from_chat)
-async def forward_inspector(message: Message):
+async def forward_inspector(message: Message, state: FSMContext):
+    # If in source chat setup state, don't intercept as target group
+    current_state = await state.get_state()
+    if current_state == BotStates.waiting_for_source_chat.state:
+        return
+        
     chat = message.forward_from_chat
     if chat.type in ["group", "supergroup"]:
         title = chat.title or f"Guruh {chat.id}"
         username = chat.username
-        # Store group in DB immediately with active=True and proper title/username
         await db.add_or_update_group(chat_id=chat.id, title=title, username=username, is_active=True)
         
         user_link = f"@{username}" if username else f"`{chat.id}`"
@@ -361,12 +414,10 @@ async def forward_inspector(message: Message):
     else:
         await message.answer("⚠️ Uzatilgan xabar guruh yoki superguruhdan emas.")
 
-# Direct Group Link or Username Inspector
 @router.message(F.text.startswith("@") | F.text.contains("t.me/"))
 async def link_group_inspector(message: Message, bot: Bot, state: FSMContext):
     current_state = await state.get_state()
     if current_state:
-        # User is in FSM state (like editing message or custom timing), let state handler handle it
         return
         
     worker_client = getattr(bot, 'worker_client', None)
@@ -408,23 +459,14 @@ async def link_group_inspector(message: Message, bot: Bot, state: FSMContext):
             f"**Maslahat:** Guruhdagi birorta xabarni to'g'ridan-to'g'ri ushbu botga **Forward (Uzatish)** qilib yuboring!"
         )
 
-@router.callback_query(F.data.startswith("add_group_"))
-async def add_forward_group_call(call: CallbackQuery, bot: Bot):
-    chat_id = int(call.data.split("_")[2])
-    await db.add_or_update_group(chat_id=chat_id, title=f"Guruh {chat_id}", is_active=True)
-    with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text("✅ Guruh muvaffaqiyatli qo'shildi va faollashtirildi!")
-    await safe_answer(call)
-
-@router.callback_query(F.data == "dismiss")
-async def dismiss_call(call: CallbackQuery):
-    with contextlib.suppress(TelegramBadRequest):
-        await call.message.delete()
-    await safe_answer(call)
-
-# Manual Test Trigger
+# ==================== MANUAL TEST TRIGGER ====================
 @router.callback_query(F.data == "trigger_test")
 async def trigger_test_call(call: CallbackQuery, bot: Bot):
+    source_chat_id = await db.get_setting("source_chat_id", None)
+    if not source_chat_id:
+        await safe_answer(call, "Avval 'Manba guruhni sozlash' tugmasi orqali xabar olinadigan guruhni ulang!", show_alert=True)
+        return
+        
     worker_event = getattr(bot, 'worker_test_event', None)
     if worker_event:
         worker_event.set()
