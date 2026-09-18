@@ -89,8 +89,7 @@ async def dashboard_view(request: Request, username: str = Depends(verify_creden
     
     enriched_users = [enrich_user_data(u) for u in users[:10]]
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={
         "active_page": "dashboard",
         "stats": stats,
         "recent_users": enriched_users,
@@ -104,8 +103,7 @@ async def users_view(request: Request, username: str = Depends(verify_credential
     pending = await db.get_pending_payment_requests()
     enriched_users = [enrich_user_data(u) for u in users]
     
-    return templates.TemplateResponse("users.html", {
-        "request": request,
+    return templates.TemplateResponse(request=request, name="users.html", context={
         "active_page": "users",
         "users": enriched_users,
         "pending_count": len(pending)
@@ -115,8 +113,7 @@ async def users_view(request: Request, username: str = Depends(verify_credential
 async def payments_view(request: Request, username: str = Depends(verify_credentials)):
     pending = await db.get_pending_payment_requests()
     
-    return templates.TemplateResponse("payments.html", {
-        "request": request,
+    return templates.TemplateResponse(request=request, name="payments.html", context={
         "active_page": "payments",
         "pending_payments": pending,
         "pending_count": len(pending)
@@ -125,8 +122,7 @@ async def payments_view(request: Request, username: str = Depends(verify_credent
 @app.get("/broadcast", response_class=HTMLResponse)
 async def broadcast_view(request: Request, username: str = Depends(verify_credentials)):
     pending = await db.get_pending_payment_requests()
-    return templates.TemplateResponse("broadcast.html", {
-        "request": request,
+    return templates.TemplateResponse(request=request, name="broadcast.html", context={
         "active_page": "broadcast",
         "pending_count": len(pending)
     })
@@ -134,7 +130,7 @@ async def broadcast_view(request: Request, username: str = Depends(verify_creden
 @app.get("/miniapp", response_class=HTMLResponse)
 async def miniapp_view(request: Request):
     """Public Mini App endpoint accessible inside Telegram Web App."""
-    return templates.TemplateResponse("miniapp.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="miniapp.html", context={})
 
 # ==================== ADMIN ACTION APIS ====================
 @app.post("/api/users/{user_id}/extend")
