@@ -117,3 +117,10 @@ async def clear_message_history(chat_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('DELETE FROM message_history WHERE chat_id = ?', (chat_id,))
         await db.commit()
+
+async def delete_group(chat_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('DELETE FROM target_groups WHERE chat_id = ?', (chat_id,))
+        await db.execute('DELETE FROM message_history WHERE chat_id = ?', (chat_id,))
+        await db.commit()
+

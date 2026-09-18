@@ -96,3 +96,10 @@ def forward_confirm_kb(chat_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✅ Guruhlar ro'yxatiga qo'shish", callback_data=f"add_group_{chat_id}")],
         [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="dismiss")]
     ])
+
+def delete_confirm_kb(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Ha, o'chirish", callback_data=f"confirm_delete_{chat_id}")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="dismiss")]
+    ])
+

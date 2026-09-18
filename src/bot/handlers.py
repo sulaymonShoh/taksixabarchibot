@@ -97,7 +97,62 @@ async def toggle_drop_author_call(call: CallbackQuery):
     await render_dashboard(call)
     await safe_answer(call, "Forward rejimi o'zgartirildi!")
 
-# ==================== SOURCE CHAT SETUP ====================
+# ==================== /SOURCE COMMAND & BUTTON ====================
+@router.message(Command("source"))
+async def source_cmd(message: Message, bot: Bot, state: FSMContext):
+    """Sets source chat via /source @username, /source https://t.me/link, or replying /source to a forwarded message."""
+    worker_client = getattr(bot, 'worker_client', None)
+    source_chat_id = None
+    source_chat_title = None
+    
+    parts = message.text.strip().split(maxsplit=1)
+    
+    # Check if replied to a forwarded message
+    if message.reply_to_message and message.reply_to_message.forward_from_chat:
+        source_chat_id = message.reply_to_message.forward_from_chat.id
+        source_chat_title = message.reply_to_message.forward_from_chat.title or f"Chat {source_chat_id}"
+        
+    elif len(parts) > 1:
+        target_input = parts[1].strip()
+        if not worker_client:
+            await message.answer("⚠️ Worker akkaunti ulanmagan.")
+            return
+        try:
+            if target_input.startswith("-100"):
+                target_input = int(target_input)
+            entity = await worker_client.get_entity(target_input)
+            source_chat_id = entity.id
+            source_chat_title = getattr(entity, 'title', f"Chat {entity.id}")
+            if not str(source_chat_id).startswith("-100"):
+                from telethon.tl.types import Channel
+                if isinstance(entity, Channel):
+                    source_chat_id = int(f"-100{entity.id}")
+        except Exception as e:
+            logger.error(f"Error setting source via command: {e}")
+            await message.answer(f"⚠️ Manba guruhni aniqlab bo'lmadi: {e}\nMisol: `/source @guruh_nomi` yoki `/source https://t.me/guruh`", parse_mode="Markdown")
+            return
+    else:
+        await message.answer(
+            "ℹ️ **Manba guruhni o'rnatish:**\n\n"
+            "Buyruq bilan o'rnatish uchun:\n"
+            "`/source @guruh_nomi` yoki `/source https://t.me/guruh`\n\n"
+            "Yoki manba guruhdagi biron bir xabarni to'g'ridan-to'g'ri Forward qilib, unga `/source` deb javob qaytaring.",
+            parse_mode="Markdown"
+        )
+        return
+        
+    if source_chat_id:
+        await db.set_setting("source_chat_id", source_chat_id)
+        await db.set_setting("source_chat_title", source_chat_title)
+        await message.answer(
+            f"✅ **Manba guruh muvaffaqiyatli o'rnatildi!**\n\n"
+            f"📢 **Nomi:** {source_chat_title}\n"
+            f"🆔 **ID:** `{source_chat_id}`\n\n"
+            f"Bot har bir doirada ushbu guruhdagi eng oxirgi xabarni olib tarqatadi.",
+            parse_mode="Markdown"
+        )
+        await render_dashboard(message, state)
+
 @router.callback_query(F.data == "set_source_chat")
 async def set_source_chat_call(call: CallbackQuery, state: FSMContext):
     with contextlib.suppress(TelegramBadRequest):
@@ -105,7 +160,7 @@ async def set_source_chat_call(call: CallbackQuery, state: FSMContext):
             "📥 **Manba guruhni sozlash**\n\n"
             "Xabarlar qaysi guruh yoki kanaldan olinib tarqatilishi kerak?\n\n"
             "👉 O'sha guruh/kanaldagi **biron bir xabarni to'g'ridan-to'g'ri ushbu botga Forward (Uzatish)** qilib yuboring,\n"
-            "yoki guruhning `@username` yoki `https://t.me/...` havolasini yuboring.\n\n"
+            "yoki buyruq orqali yuboring: `/source @guruh_nomi`\n\n"
             "*(Bot har doim o'sha guruhdagi eng oxirgi yuborilgan yangi xabarni avtomatik oladi)*",
             reply_markup=kb.back_kb(),
             parse_mode="Markdown"
@@ -164,6 +219,76 @@ async def process_source_chat_input(message: Message, state: FSMContext, bot: Bo
             "⚠️ Noma'lum format. Iltimos, manba guruhingizdan birorta xabarni botga Forward qilib yuboring!",
             reply_markup=kb.back_kb()
         )
+
+# ==================== /REMOVE OR /DELETE COMMAND ====================
+@router.message(Command("remove"))
+@router.message(Command("delete"))
+async def remove_group_cmd(message: Message, bot: Bot):
+    """Initiates removing a target group with interactive confirmation."""
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(
+            "ℹ️ **Guruhni ro'yxatdan o'chirish:**\n\n"
+            "Misol:\n"
+            "`/remove @guruh_nomi`\n"
+            "`/remove https://t.me/guruh`\n"
+            "`/remove -1001234567890`",
+            parse_mode="Markdown"
+        )
+        return
+        
+    query = parts[1].strip()
+    target_chat_id = None
+    target_title = None
+    
+    # Check in DB directly first
+    groups = await db.get_all_groups()
+    for g in groups:
+        clean_username = (g.get('username') or '').lstrip('@').lower()
+        query_username = query.lstrip('@').replace('https://t.me/', '').replace('http://t.me/', '').lower()
+        if (clean_username and clean_username == query_username) or str(g['chat_id']) == query:
+            target_chat_id = g['chat_id']
+            target_title = g.get('title', 'Guruh')
+            break
+            
+    # If not matched directly in DB, try resolving via worker_client
+    if not target_chat_id:
+        worker_client = getattr(bot, 'worker_client', None)
+        if worker_client:
+            try:
+                entity = await worker_client.get_entity(query)
+                entity_id = entity.id
+                if not str(entity_id).startswith("-100"):
+                    from telethon.tl.types import Channel
+                    if isinstance(entity, Channel):
+                        entity_id = int(f"-100{entity.id}")
+                for g in groups:
+                    if g['chat_id'] == entity_id or g['chat_id'] == entity.id:
+                        target_chat_id = g['chat_id']
+                        target_title = g.get('title', 'Guruh')
+                        break
+            except Exception:
+                pass
+                
+    if not target_chat_id:
+        await message.answer(f"⚠️ `{query}` nomli guruh bazada topilmadi.", parse_mode="Markdown")
+        return
+        
+    text = (
+        f"❓ **Guruhni ro'yxatdan o'chirishni tasdiqlaysizmi?**\n\n"
+        f"👥 **Guruh:** {target_title}\n"
+        f"🆔 **ID:** `{target_chat_id}`\n\n"
+        f"O'chirilgach, bot ushbu guruhga xabar yubormaydi."
+    )
+    await message.answer(text, reply_markup=kb.delete_confirm_kb(target_chat_id), parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("confirm_delete_"))
+async def confirm_delete_call(call: CallbackQuery):
+    chat_id = int(call.data.split("_")[2])
+    await db.delete_group(chat_id)
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text("✅ Guruh ro'yxatdan butunlay o'chirildi!")
+    await safe_answer(call, "Guruh o'chirildi!", show_alert=True)
 
 # ==================== TIMING CONFIGURATION ====================
 @router.callback_query(F.data == "adjust_timing")
@@ -389,7 +514,7 @@ async def toggle_group_call(call: CallbackQuery):
 # ==================== QUICK TARGET GROUP ADD ====================
 @router.message(F.forward_from_chat)
 async def forward_inspector(message: Message, state: FSMContext):
-    # If in source chat setup state, don't intercept as target group
+    # If in source chat setup state, let that state handler handle it
     current_state = await state.get_state()
     if current_state == BotStates.waiting_for_source_chat.state:
         return
@@ -458,6 +583,12 @@ async def link_group_inspector(message: Message, bot: Bot, state: FSMContext):
             f"⚠️ Guruhni havola orqali topib bo'lmadi.\n"
             f"**Maslahat:** Guruhdagi birorta xabarni to'g'ridan-to'g'ri ushbu botga **Forward (Uzatish)** qilib yuboring!"
         )
+
+@router.callback_query(F.data == "dismiss")
+async def dismiss_call(call: CallbackQuery):
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.delete()
+    await safe_answer(call)
 
 # ==================== MANUAL TEST TRIGGER ====================
 @router.callback_query(F.data == "trigger_test")
