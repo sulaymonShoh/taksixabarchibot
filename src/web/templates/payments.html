@@ -1,0 +1,98 @@
+﻿{% extends "base.html" %}
+{% block title %}To'lov Cheklari — Taksi Xabarchi{% endblock %}
+{% block content %}
+<div class="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <h2 class="text-2xl font-bold text-white tracking-tight">To'lov Cheklarini Tekshirish</h2>
+            <p class="text-sm text-slate-400 mt-1">Haydovchilar tomonidan yuborilgan to'lov cheklari va skrinshotlar</p>
+        </div>
+    </div>
+
+    {% if pending_payments %}
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% for p in pending_payments %}
+        <div class="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between backdrop-blur-sm shadow-xl">
+            <div>
+                <div class="flex items-center justify-between mb-3">
+                    <span class="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold">
+                        Chek #{{ p.id }}
+                    </span>
+                    <span class="text-xs text-slate-400">{{ p.created_at }}</span>
+                </div>
+                
+                <div class="space-y-2 mb-4">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-400">User ID:</span>
+                        <span class="text-white font-mono font-bold">{{ p.user_id }}</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-400">Tanlangan tarif:</span>
+                        <span class="text-amber-400 font-semibold">{{ p.plan_months }} Oy</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-400">To'lov summasi:</span>
+                        <span class="text-emerald-400 font-bold font-mono">{{ p.amount_uzs }} so'm</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-400">Telegram File ID:</span>
+                        <span class="text-xs text-slate-500 font-mono truncate max-w-[180px]">{{ p.receipt_file_id }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-4 border-t border-slate-800 flex items-center space-x-3">
+                <button onclick="approvePayment({{ p.id }}, {{ p.user_id }}, {{ p.plan_months }})" 
+                        class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition shadow-lg shadow-emerald-600/20">
+                    <i class="fa-solid fa-check mr-1.5"></i> Tasdiqlash (+{{ p.plan_months }}m)
+                </button>
+                <button onclick="rejectPayment({{ p.id }})" 
+                        class="py-2 px-3 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 font-bold text-xs rounded-xl border border-rose-500/30 transition">
+                    <i class="fa-solid fa-xmark"></i> Rad etish
+                </button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-12 text-center text-slate-400">
+        <i class="fa-solid fa-circle-check text-4xl text-emerald-500/50 mb-3"></i>
+        <h3 class="text-lg font-semibold text-white">Hozircha kutilayotgan cheklar yo'q</h3>
+        <p class="text-sm text-slate-500 mt-1">Yangi to'lov cheki yuborilganda bu yerda va Telegram kanalida darhol ko'rinadi.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+async function approvePayment(requestId, userId, months) {
+    if (!confirm(`Chek #${requestId} ni tasdiqlab, foydalanuvchiga +${months} oylik obuna berishni tasdiqlaysizmi?`)) return;
+    let res = await fetch(`/api/payments/${requestId}/approve`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({user_id: userId, plan_months: months})
+    });
+    let data = await res.json();
+    if (data.success) {
+        alert("To'lov muvaffaqiyatli tasdiqlandi!");
+        location.reload();
+    } else {
+        alert("Xatolik: " + data.error);
+    }
+}
+
+async function rejectPayment(requestId) {
+    if (!confirm(`Chek #${requestId} ni rad etishni tasdiqlaysizmi?`)) return;
+    let res = await fetch(`/api/payments/${requestId}/reject`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"}
+    });
+    let data = await res.json();
+    if (data.success) {
+        location.reload();
+    } else {
+        alert("Xatolik: " + data.error);
+    }
+}
+</script>
+{% endblock %}
