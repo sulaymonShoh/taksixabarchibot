@@ -86,13 +86,15 @@ async def get_or_create_user(user_id: int, full_name: str, username: Optional[st
         async with db.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)) as cursor:
             row = await cursor.fetchone()
             if row:
-                # Update latest name/username if changed
                 await db.execute(
                     'UPDATE users SET full_name = ?, username = ? WHERE user_id = ?',
                     (full_name, username, user_id)
                 )
                 await db.commit()
-                return dict(row), False
+                user_dict = dict(row)
+                user_dict['full_name'] = full_name
+                user_dict['username'] = username
+                return user_dict, False
                 
         # Brand new user -> Grant 3-day free trial!
         expiry = datetime.utcnow() + timedelta(days=DEFAULT_TRIAL_DAYS)

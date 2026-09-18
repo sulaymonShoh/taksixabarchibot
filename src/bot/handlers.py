@@ -885,6 +885,141 @@ async def jitter_preset_call(call: CallbackQuery):
     await render_dashboard(call, user_id)
     await safe_answer(call, f"Yuborish tezligi: {label}")
 
+@router.callback_query(F.data == "time_custom")
+async def time_custom_call(call: CallbackQuery, state: FSMContext):
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(
+            "✍️ **O'zingiz doira vaqtini kiriting**\n\n"
+            "Doiralar orasidagi minimal va maksimal kutish vaqtini (soniyalarda) probel bilan yuboring.\n"
+            "Masalan: `60 90` yoki `180 300`",
+            reply_markup=kb.back_kb(),
+            parse_mode="Markdown"
+        )
+    await state.set_state(BotStates.waiting_for_custom_timing)
+    await safe_answer(call)
+
+@router.message(BotStates.waiting_for_custom_timing)
+async def process_custom_timing(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 2:
+            raise ValueError()
+        c_min, c_max = int(parts[0]), int(parts[1])
+        if c_min < 0 or c_max < c_min:
+            raise ValueError()
+            
+        await db.set_user_setting(user_id, "cycle_min", c_min)
+        await db.set_user_setting(user_id, "cycle_max", c_max)
+        await render_dashboard(message, user_id, state)
+    except ValueError:
+        await message.answer(
+            "⚠️ Noto'g'ri format. Iltimos, ikkita musbat son kiriting, masalan: `60 90` yoki `180 300`.",
+            reply_markup=kb.back_kb()
+        )
+
+@router.callback_query(F.data == "jitter_custom")
+async def jitter_custom_call(call: CallbackQuery, state: FSMContext):
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(
+            "✍️ **O'zingiz yuborish tezligini kiriting**\n\n"
+            "Har bir guruh orasidagi minimal va maksimal vaqtni (soniyalarda) probel bilan kiriting.\n"
+            "Masalan: `1.5 2.0` yoki `2 4`",
+            reply_markup=kb.back_kb(),
+            parse_mode="Markdown"
+        )
+    await state.set_state(BotStates.waiting_for_custom_jitter)
+    await safe_answer(call)
+
+@router.message(BotStates.waiting_for_custom_jitter)
+async def process_custom_jitter(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 2:
+            raise ValueError()
+        j_min, j_max = float(parts[0]), float(parts[1])
+        if j_min < 0.5 or j_max < j_min:
+            raise ValueError()
+            
+        await db.set_user_setting(user_id, "jitter_min", j_min)
+        await db.set_user_setting(user_id, "jitter_max", j_max)
+        await render_dashboard(message, user_id, state)
+    except ValueError:
+        await message.answer(
+            "⚠️ Noto'g'ri format. Iltimos, kamida 0.5 bo'lgan ikkita son kiriting, masalan: `1.5 2.0`.",
+            reply_markup=kb.back_kb()
+        )
+
+# ==================== /REMOVE OR /DELETE TARGET GROUP ====================
+@router.message(Command("remove"))
+@router.message(Command("delete"))
+async def remove_group_cmd(message: Message, bot: Bot):
+    user_id = message.from_user.id
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(
+            "ℹ️ **Guruhni ro'yxatdan o'chirish:**\n\n"
+            "Misol:\n"
+            "`/remove @guruh_nomi`\n"
+            "`/remove https://t.me/guruh`\n"
+            "`/remove -1001234567890`",
+            parse_mode="Markdown"
+        )
+        return
+        
+    query = parts[1].strip()
+    target_chat_id = None
+    target_title = None
+    
+    groups = await db.get_user_groups(user_id)
+    for g in groups:
+        clean_username = (g.get('username') or '').lstrip('@').lower()
+        query_username = query.lstrip('@').replace('https://t.me/', '').replace('http://t.me/', '').lower()
+        if (clean_username and clean_username == query_username) or str(g['chat_id']) == query:
+            target_chat_id = g['chat_id']
+            target_title = g.get('title', 'Guruh')
+            break
+            
+    if not target_chat_id:
+        worker_mgr = getattr(bot, 'worker_manager', None)
+        client = worker_mgr.get_user_client(user_id) if worker_mgr else None
+        if client:
+            try:
+                entity = await client.get_entity(query)
+                entity_id = entity.id
+                if not str(entity_id).startswith("-100"):
+                    from telethon.tl.types import Channel
+                    if isinstance(entity, Channel):
+                        entity_id = int(f"-100{entity.id}")
+                for g in groups:
+                    if g['chat_id'] == entity_id:
+                        target_chat_id = g['chat_id']
+                        target_title = g.get('title', 'Guruh')
+                        break
+            except Exception:
+                pass
+                
+    if not target_chat_id:
+        await message.answer(f"⚠️ `{query}` nomli guruh ro'yxatingizda topilmadi.", parse_mode="Markdown")
+        return
+        
+    text = (
+        f"❓ **Guruhni ro'yxatdan o'chirishni tasdiqlaysizmi?**\n\n"
+        f"👥 **Guruh:** {target_title}\n"
+        f"🆔 **ID:** `{target_chat_id}`"
+    )
+    await message.answer(text, reply_markup=kb.delete_confirm_kb(target_chat_id), parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("confirm_delete_"))
+async def confirm_delete_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    chat_id = int(call.data.split("_")[2])
+    await db.delete_user_group(user_id, chat_id)
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text("✅ Guruh ro'yxatingizdan muvaffaqiyatli o'chirildi!")
+    await safe_answer(call, "Guruh o'chirildi!", show_alert=True)
+
 # ==================== MANUAL TEST TRIGGER ====================
 @router.callback_query(F.data == "trigger_test")
 async def trigger_test_call(call: CallbackQuery, bot: Bot):
@@ -940,6 +1075,65 @@ async def admin_stats_call(call: CallbackQuery):
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_text(text, reply_markup=kb.superadmin_kb(), parse_mode="Markdown")
     await safe_answer(call)
+
+@router.callback_query(F.data == "admin_pending_cheques")
+async def admin_pending_cheques_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    pending = await db.get_pending_payment_requests()
+    if not pending:
+        with contextlib.suppress(TelegramBadRequest):
+            await call.message.edit_text("✅ Kutilayotgan to'lov cheklari yo'q.", reply_markup=kb.superadmin_kb())
+        await safe_answer(call)
+        return
+        
+    text = f"🧾 **Kutilayotgan to'lov cheklari: {len(pending)} ta**\n\n"
+    for p in pending[:5]:
+        text += f"• Chek #{p['id']}: User `{p['user_id']}` — {p['plan_months']} oy ({p['amount_uzs']:,} so'm)\n"
+    text += "\nTo'lovlarni tasdiqlash uchun admin kanaliga qarang yoki veb-paneldan foydalaning."
+    
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb.superadmin_kb(), parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.callback_query(F.data == "admin_broadcast_msg")
+async def admin_broadcast_call(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(
+            "📢 **Barcha foydalanuvchilarga xabar yuborish**\n\n"
+            "Yuboriladigan xabar matnini kiriting (Bekor qilish uchun /cancel deb yozing):",
+            reply_markup=kb.back_kb(),
+            parse_mode="Markdown"
+        )
+    await state.set_state(AdminStates.waiting_for_broadcast)
+    await safe_answer(call)
+
+@router.message(AdminStates.waiting_for_broadcast)
+async def process_admin_broadcast(message: Message, state: FSMContext, bot: Bot):
+    if message.from_user.id != ADMIN_ID:
+        return
+    if message.text == "/cancel":
+        await state.clear()
+        await message.answer("Xabar tarqatish bekor qilindi.")
+        return
+        
+    text = message.text
+    users = await db.get_all_users()
+    await state.clear()
+    status_msg = await message.answer(f"⏳ {len(users)} ta foydalanuvchiga xabar yuborilmoqda...")
+    
+    sent = 0
+    for u in users:
+        try:
+            await bot.send_message(chat_id=u['user_id'], text=text, parse_mode="Markdown")
+            sent += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            pass
+            
+    await status_msg.edit_text(f"✅ Xabar muvaffaqiyatli tarqatildi! ({sent}/{len(users)} ta yetkazildi)")
 
 @router.callback_query(F.data == "dismiss")
 async def dismiss_call(call: CallbackQuery):
