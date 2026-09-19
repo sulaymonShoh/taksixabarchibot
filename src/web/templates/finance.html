@@ -181,8 +181,20 @@
                         <td class="py-3.5 px-4 text-xs font-semibold text-amber-600 dark:text-amber-400">
                             {{ p.plan_months }} Oy
                         </td>
-                        <td class="py-3.5 px-4 text-sm font-mono font-bold text-slate-900 dark:text-white">
-                            {{ "{:,}".format(p.amount_uzs) }} so'm
+                        <td class="py-3.5 px-4">
+                            <div class="text-sm font-mono font-bold text-slate-900 dark:text-white">
+                                {{ "{:,}".format(p.amount_uzs) }} so'm
+                            </div>
+                            {% if p.discount_info and p.discount_info.total_savings %}
+                            <div class="text-[10px] text-amber-600 dark:text-amber-400 font-sans" title="{{ p.discount_info.calculation }}">
+                                <i class="fa-solid fa-tag mr-0.5"></i> -{{ "{:,}".format(p.discount_info.total_savings) }} so'm
+                                {% if p.discount_info.promocode %}({{ p.discount_info.promocode }}){% endif %}
+                            </div>
+                            {% elif p.promocode %}
+                            <div class="text-[10px] text-blue-500 font-mono">
+                                {{ p.promocode }}
+                            </div>
+                            {% endif %}
                         </td>
                         <td class="py-3.5 px-4">
                             <button onclick="openPhotoModal('/api/receipt-photo/{{ p.id }}', 'Chek #{{ p.id }} — {{ p.full_name }}')" 

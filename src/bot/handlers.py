@@ -51,14 +51,16 @@ PRICING_PLANS = {
 
 def calculate_effective_plan_prices(campaign: Optional[Dict[str, Any]] = None, promo: Optional[Dict[str, Any]] = None) -> Dict[int, Dict[str, Any]]:
     """
-    Calculates final prices, original prices, and badges for each plan (1, 3, 6, 12).
-    Respects per-plan discounts from active campaign and applied promocode.
+    Calculates final prices, original prices, badges, and detailed calculation breakdowns
+    for each plan (1, 3, 6, 12).
     """
     results = {}
     camp_discounts = campaign.get("plan_discounts", {}) if campaign else {}
+    camp_title = campaign.get("title", "Aksiya") if campaign else ""
     
     promo_type = promo.get("discount_type") if promo else None
     promo_val = float(promo.get("discount_value", 0)) if promo else 0
+    promo_code = promo.get("code") if promo else None
     promo_plans = promo.get("applicable_plans", "ALL") if promo else "ALL"
     promo_plan_list = [p.strip() for p in promo_plans.split(",")] if promo_plans != "ALL" else ["1", "3", "6", "12"]
     
@@ -66,33 +68,64 @@ def calculate_effective_plan_prices(campaign: Optional[Dict[str, Any]] = None, p
         price = base_price
         tags = []
         
-        # 1. Campaign discount (e.g. 12% on 3m, 20% on 12m)
+        # 1. Campaign discount (e.g. 10% on 3m)
         m_str = str(months)
         camp_pct = int(camp_discounts.get(m_str, 0))
+        camp_discount_uzs = 0
         if camp_pct > 0:
-            discount_amount = int(base_price * (camp_pct / 100.0))
-            price = max(1000, price - discount_amount)
+            camp_discount_uzs = int(base_price * (camp_pct / 100.0))
+            price = max(1000, price - camp_discount_uzs)
             tags.append(f"-{camp_pct}% aksiya")
             
         # 2. Promocode discount (if applicable to this plan)
+        promo_discount_uzs = 0
+        promo_applied_this_plan = False
         if promo and m_str in promo_plan_list:
+            promo_applied_this_plan = True
             if promo_type == "PERCENT":
-                p_amount = int(price * (promo_val / 100.0))
-                price = max(1000, price - p_amount)
+                promo_discount_uzs = int(price * (promo_val / 100.0))
+                price = max(1000, price - promo_discount_uzs)
                 tags.append(f"-{int(promo_val)}% promo")
             elif promo_type == "FIXED":
-                price = max(1000, price - int(promo_val))
+                promo_discount_uzs = min(price - 1000, int(promo_val))
+                price = max(1000, price - promo_discount_uzs)
                 tags.append(f"-{int(promo_val):,} so'm promo")
                 
         price = int(round(price / 100.0) * 100)
         tag_str = ", ".join(tags)
+        total_savings = base_price - price
+        
+        # Step-by-step formula calculation string
+        calc_formula = f"{base_price:,}"
+        if camp_pct > 0:
+            calc_formula += f" - {camp_discount_uzs:,} ({camp_title or 'Aksiya'}: {camp_pct}%)"
+        if promo_applied_this_plan:
+            p_desc = f"{int(promo_val)}%" if promo_type == "PERCENT" else f"{int(promo_val):,} so'm"
+            calc_formula += f" - {promo_discount_uzs:,} ({promo_code}: {p_desc})"
+        calc_formula += f" = {price:,} so'm"
+        
+        discount_details = {
+            "base_price": base_price,
+            "final_price": price,
+            "total_savings": total_savings,
+            "campaign_title": camp_title if camp_pct > 0 else None,
+            "campaign_percent": camp_pct if camp_pct > 0 else None,
+            "campaign_discount_uzs": camp_discount_uzs if camp_pct > 0 else 0,
+            "promocode": promo_code if promo_applied_this_plan else None,
+            "promo_type": promo_type if promo_applied_this_plan else None,
+            "promo_value": promo_val if promo_applied_this_plan else 0,
+            "promo_discount_uzs": promo_discount_uzs if promo_applied_this_plan else 0,
+            "calculation": calc_formula
+        }
+        
         results[months] = {
             "title": title,
             "base_price": base_price,
             "price": price,
             "tag": tag_str,
             "is_discounted": price < base_price,
-            "bonus_days": bonus_days
+            "bonus_days": bonus_days,
+            "discount_details": discount_details
         }
         
     return results
@@ -448,18 +481,25 @@ async def select_plan_call(call: CallbackQuery, state: FSMContext):
     applied_promo = state_data.get("applied_promo")
     
     plan_prices = calculate_effective_plan_prices(campaign, applied_promo)
-    plan_info = plan_prices.get(months, {"price": 25000, "title": f"{months} Oy", "tag": ""})
+    plan_info = plan_prices.get(months, {"price": 25000, "base_price": 25000, "title": f"{months} Oy", "tag": "", "discount_details": {}})
     amount_uzs = plan_info["price"]
+    base_amount_uzs = plan_info["base_price"]
+    discount_details = plan_info.get("discount_details", {})
     title = plan_info["title"]
     
     await state.set_state(PaymentStates.waiting_for_cheque)
     await state.update_data(
         plan_months=months,
         amount_uzs=amount_uzs,
-        applied_promo=applied_promo
+        base_amount_uzs=base_amount_uzs,
+        discount_details=discount_details,
+        promocode=discount_details.get("promocode")
     )
     
-    discount_note = f"\n🏷 **Chegirma:** {plan_info['tag']}" if plan_info.get("tag") else ""
+    discount_note = ""
+    if discount_details.get("campaign_percent") or discount_details.get("promocode"):
+        discount_note = f"\n🏷 **Chegirmalar:** {plan_info['tag']}\n💡 **Hisob-kitob:** `{discount_details.get('calculation')}`"
+        
     text = (
         f"🧾 **Tarif tanlandi: {title}**{discount_note}\n\n"
         f"💰 **To'lov summasi:** `{amount_uzs:,}` so'm\n\n"
@@ -478,17 +518,23 @@ async def process_cheque_photo(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     plan_months = data.get("plan_months", 1)
     amount_uzs = data.get("amount_uzs", 25000)
+    base_amount_uzs = data.get("base_amount_uzs", amount_uzs)
+    discount_details = data.get("discount_details") or {}
+    promocode = data.get("promocode")
     applied_promo = data.get("applied_promo")
     
     # Get highest resolution photo
     photo_file_id = message.photo[-1].file_id
     
-    # Store payment request in DB
+    # Store payment request in DB with discount details and promocode!
     request_id = await db.create_payment_request(
         user_id=user_id,
         plan_months=plan_months,
         amount_uzs=amount_uzs,
-        receipt_file_id=photo_file_id
+        receipt_file_id=photo_file_id,
+        base_amount_uzs=base_amount_uzs,
+        discount_details=discount_details,
+        promocode=promocode
     )
     
     # Record promo usage if a discount promo was used
@@ -508,14 +554,29 @@ async def process_cheque_photo(message: Message, state: FSMContext, bot: Bot):
     full_name = user.get('full_name', message.from_user.full_name)
     username = user.get('username') or 'Mavjud emas'
     
-    promo_line = f"\n🎟 **Promokod:** `{applied_promo['code']}`" if applied_promo else ""
+    has_discounts = discount_details.get("campaign_percent") or discount_details.get("promocode")
+    discount_block = ""
+    if has_discounts:
+        discount_block = "\n🏷 **Chegirma va Hisob-kitob:**\n"
+        discount_block += f"• **Asl narx:** {base_amount_uzs:,} so'm\n"
+        if discount_details.get("campaign_percent"):
+            discount_block += f"• **Aksiya:** {discount_details['campaign_title']} (-{discount_details['campaign_percent']}% ➡️ -{discount_details['campaign_discount_uzs']:,} so'm)\n"
+        if discount_details.get("promocode"):
+            p_val_str = f"-{int(discount_details['promo_value'])}%" if discount_details.get('promo_type') == 'PERCENT' else f"-{int(discount_details['promo_value']):,} so'm"
+            discount_block += f"• **Promokod:** `{discount_details['promocode']}` ({p_val_str} ➡️ -{discount_details['promo_discount_uzs']:,} so'm)\n"
+        if discount_details.get("calculation"):
+            discount_block += f"• **Formula:** `{discount_details['calculation']}`\n"
+        if discount_details.get("total_savings"):
+            discount_block += f"💡 **Jami tejaldi:** `{discount_details['total_savings']:,} so'm`\n"
+
     admin_caption = (
         f"🧾 **Yangi To'lov Cheki (ID: #{request_id})**\n\n"
         f"👤 **Mijoz:** {full_name}\n"
         f"🆔 **User ID:** `{user_id}`\n"
         f"🔗 **Username:** @{username}\n"
-        f"📦 **Tanlangan tarif:** {plan_months} Oy{promo_line}\n"
-        f"💰 **Summa:** {amount_uzs:,} so'm\n"
+        f"📦 **Tanlangan tarif:** {plan_months} Oy\n"
+        f"💰 **To'lov summasi:** {amount_uzs:,} so'm\n"
+        f"{discount_block}\n"
         f"🕒 **Vaqt:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
     )
     

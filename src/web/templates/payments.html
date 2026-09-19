@@ -117,9 +117,49 @@
                     </div>
                     <div class="flex justify-between">
                         <span class="text-slate-500 dark:text-slate-400">To'lov summasi:</span>
-                        <span class="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{{ p.amount_uzs }} so'm</span>
+                        <span class="text-emerald-600 dark:text-emerald-400 font-bold font-mono">{{ "{:,}".format(p.amount_uzs) }} so'm</span>
                     </div>
-                    <div class="flex justify-between">
+                    
+                    {% if p.discount_info and (p.discount_info.campaign_percent or p.discount_info.promocode) %}
+                    <div class="mt-2.5 pt-2 border-t border-dashed border-slate-200 dark:border-slate-800/80 space-y-1 bg-slate-50/70 dark:bg-slate-900/50 -mx-1 p-2.5 rounded-xl">
+                        <div class="flex justify-between text-[11px]">
+                            <span class="text-slate-500 dark:text-slate-400">Asl narx:</span>
+                            <span class="text-slate-400 line-through font-mono">{{ "{:,}".format(p.base_amount_uzs or p.discount_info.base_price) }} so'm</span>
+                        </div>
+                        {% if p.discount_info.campaign_percent %}
+                        <div class="flex justify-between text-[11px]">
+                            <span class="text-amber-600 dark:text-amber-400 font-medium">Aksiya ({{ p.discount_info.campaign_title or 'Aksiya' }}):</span>
+                            <span class="text-amber-600 dark:text-amber-400 font-mono font-bold">-{{ p.discount_info.campaign_percent }}% (-{{ "{:,}".format(p.discount_info.campaign_discount_uzs) }} so'm)</span>
+                        </div>
+                        {% endif %}
+                        {% if p.discount_info.promocode %}
+                        <div class="flex justify-between text-[11px]">
+                            <span class="text-blue-600 dark:text-blue-400 font-medium">Promokod ({{ p.discount_info.promocode }}):</span>
+                            <span class="text-blue-600 dark:text-blue-400 font-mono font-bold">
+                                {% if p.discount_info.promo_type == 'PERCENT' %}-{{ p.discount_info.promo_value|int }}% (-{{ "{:,}".format(p.discount_info.promo_discount_uzs) }} so'm){% else %}-{{ "{:,}".format(p.discount_info.promo_discount_uzs) }} so'm{% endif %}
+                            </span>
+                        </div>
+                        {% endif %}
+                        {% if p.discount_info.calculation %}
+                        <div class="mt-1 pt-1 border-t border-slate-200/60 dark:border-slate-800/60 text-[10px] text-slate-500 dark:text-slate-400 font-mono leading-relaxed break-words">
+                            <span class="text-slate-400 dark:text-slate-500 font-sans font-medium">Hisob-kitob:</span> {{ p.discount_info.calculation }}
+                        </div>
+                        {% endif %}
+                        {% if p.discount_info.total_savings %}
+                        <div class="flex justify-between text-[11px] text-emerald-600 dark:text-emerald-400 pt-0.5 font-semibold">
+                            <span>Jami tejaldi:</span>
+                            <span class="font-mono">{{ "{:,}".format(p.discount_info.total_savings) }} so'm</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% elif p.promocode %}
+                    <div class="flex justify-between text-[11px] text-blue-600 dark:text-blue-400 font-mono">
+                        <span>Promokod:</span>
+                        <span class="font-bold">{{ p.promocode }}</span>
+                    </div>
+                    {% endif %}
+
+                    <div class="flex justify-between pt-1">
                         <span class="text-slate-500 dark:text-slate-400">Yuborilgan vaqt:</span>
                         <span class="text-slate-600 dark:text-slate-400 font-mono text-[11px]">{{ p.created_at }}</span>
                     </div>

@@ -184,7 +184,49 @@ def run_tests():
     # Stop campaign via API
     res_stop = client.post("/api/discounts/campaign/stop", auth=auth)
     assert res_stop.status_code == 200
-    print("   [PASS] Web dashboard and REST APIs all verified.")
+
+    # ==================== 6. PAYMENT REQUEST WITH DISCOUNT DETAILS & FORMULA ====================
+    print(">>> 6. Testing Payment Request with Discount Breakdown & Formula Calculation...")
+    disc_details = {
+        "base_price": 65000,
+        "final_price": 49700,
+        "total_savings": 15300,
+        "campaign_title": "Aksiya",
+        "campaign_percent": 10,
+        "campaign_discount_uzs": 6500,
+        "promocode": "QODIRALI",
+        "promo_type": "PERCENT",
+        "promo_value": 15,
+        "promo_discount_uzs": 8800,
+        "calculation": "65,000 - 6,500 (Aksiya: 10%) - 8,800 (QODIRALI: 15%) = 49,700 so'm"
+    }
+    req_id = asyncio.run(db.create_payment_request(
+        user_id=501,
+        plan_months=3,
+        amount_uzs=49700,
+        receipt_file_id="sample_receipt_file_id",
+        base_amount_uzs=65000,
+        discount_details=disc_details,
+        promocode="QODIRALI"
+    ))
+    assert req_id > 0
+
+    # Verify retrieval from DB
+    retrieved_req = asyncio.run(db.get_payment_request(req_id))
+    assert retrieved_req["base_amount_uzs"] == 65000
+    assert retrieved_req["amount_uzs"] == 49700
+    assert retrieved_req["promocode"] == "QODIRALI"
+    assert retrieved_req["discount_info"]["campaign_percent"] == 10
+    assert retrieved_req["discount_info"]["calculation"] == "65,000 - 6,500 (Aksiya: 10%) - 8,800 (QODIRALI: 15%) = 49,700 so'm"
+
+    # Verify rendering on /payments page
+    res_payments = client.get("/payments", auth=auth)
+    assert res_payments.status_code == 200
+    assert "QODIRALI" in res_payments.text
+    assert "65,000" in res_payments.text
+    assert "49,700" in res_payments.text
+    assert "65,000 - 6,500 (Aksiya: 10%)" in res_payments.text
+    print("   [PASS] Payment request stored with full discount breakdown and formula rendered in Web UI.")
 
     # Clean up test db
     if os.path.exists("data/test_discounts_suite.db"):

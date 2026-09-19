@@ -62,11 +62,24 @@ async def init_db():
                 user_id INTEGER,
                 plan_months INTEGER,
                 amount_uzs INTEGER,
+                base_amount_uzs INTEGER,
+                discount_details TEXT,
+                promocode TEXT,
                 receipt_file_id TEXT,
                 status TEXT DEFAULT 'PENDING',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Automatic column migration for existing databases
+        async with db.execute("PRAGMA table_info(payment_requests)") as cursor:
+            cols = [r[1] for r in await cursor.fetchall()]
+            if 'base_amount_uzs' not in cols:
+                await db.execute('ALTER TABLE payment_requests ADD COLUMN base_amount_uzs INTEGER')
+            if 'discount_details' not in cols:
+                await db.execute('ALTER TABLE payment_requests ADD COLUMN discount_details TEXT')
+            if 'promocode' not in cols:
+                await db.execute('ALTER TABLE payment_requests ADD COLUMN promocode TEXT')
         
         # Global platform settings
         await db.execute('''
@@ -303,14 +316,36 @@ async def delete_user_group(user_id: int, chat_id: int):
         await db.commit()
 
 # ==================== PAYMENT REQUESTS (1-TAP CHEQUE APPROVAL) ====================
-async def create_payment_request(user_id: int, plan_months: int, amount_uzs: int, receipt_file_id: str) -> int:
+def _enrich_payment_row(row_dict: Dict[str, Any]) -> Dict[str, Any]:
+    disc_details = row_dict.get('discount_details')
+    if disc_details and isinstance(disc_details, str):
+        try:
+            row_dict['discount_info'] = json.loads(disc_details)
+        except Exception:
+            row_dict['discount_info'] = None
+    elif isinstance(disc_details, dict):
+        row_dict['discount_info'] = disc_details
+    else:
+        row_dict['discount_info'] = None
+    return row_dict
+
+async def create_payment_request(
+    user_id: int,
+    plan_months: int,
+    amount_uzs: int,
+    receipt_file_id: str,
+    base_amount_uzs: Optional[int] = None,
+    discount_details: Optional[Union[str, Dict[str, Any]]] = None,
+    promocode: Optional[str] = None
+) -> int:
+    disc_str = json.dumps(discount_details) if isinstance(discount_details, dict) else discount_details
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             '''
-            INSERT INTO payment_requests (user_id, plan_months, amount_uzs, receipt_file_id, status)
-            VALUES (?, ?, ?, ?, 'PENDING')
+            INSERT INTO payment_requests (user_id, plan_months, amount_uzs, base_amount_uzs, discount_details, promocode, receipt_file_id, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')
             ''',
-            (user_id, plan_months, amount_uzs, receipt_file_id)
+            (user_id, plan_months, amount_uzs, base_amount_uzs, disc_str, promocode, receipt_file_id)
         )
         await db.commit()
         return cursor.lastrowid
@@ -320,14 +355,14 @@ async def get_payment_request(request_id: int) -> Optional[Dict[str, Any]]:
         db.row_factory = aiosqlite.Row
         async with db.execute('SELECT * FROM payment_requests WHERE id = ?', (request_id,)) as cursor:
             row = await cursor.fetchone()
-            return dict(row) if row else None
+            return _enrich_payment_row(dict(row)) if row else None
 
 async def get_pending_payment_requests() -> List[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute('SELECT * FROM payment_requests WHERE status = "PENDING" ORDER BY created_at ASC') as cursor:
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            return [_enrich_payment_row(dict(row)) for row in rows]
 
 async def get_all_payment_requests(status: Optional[str] = None) -> List[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -338,7 +373,7 @@ async def get_all_payment_requests(status: Optional[str] = None) -> List[Dict[st
         else:
             async with db.execute('SELECT * FROM payment_requests ORDER BY created_at DESC') as cursor:
                 rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+        return [_enrich_payment_row(dict(row)) for row in rows]
 
 async def update_payment_request_status(request_id: int, status: str):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -415,6 +450,9 @@ async def get_payment_history(limit: int = 200) -> List[Dict[str, Any]]:
                 p.user_id,
                 p.plan_months,
                 p.amount_uzs,
+                p.base_amount_uzs,
+                p.discount_details,
+                p.promocode,
                 p.receipt_file_id,
                 p.status,
                 p.created_at,
@@ -428,7 +466,7 @@ async def get_payment_history(limit: int = 200) -> List[Dict[str, Any]]:
         """
         async with db.execute(query, (limit,)) as cursor:
             rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+            return [_enrich_payment_row(dict(r)) for r in rows]
 
 # ==================== GLOBAL SETTINGS ====================
 async def get_global_setting(key: str, default: Any = None) -> Any:
