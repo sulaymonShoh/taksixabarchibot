@@ -2,6 +2,7 @@ import os
 import re
 import asyncio
 import contextlib
+import html
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -44,8 +45,8 @@ class AdminStates(StatesGroup):
 # Pricing definition (months -> (amount_uzs, display_title, bonus_days))
 PRICING_PLANS = {
     1: (25000, "1 Oy", 30),
-    3: (65000, "3 Oy (-10%)", 90),
-    6: (120000, "6 Oy (-20%)", 180),
+    3: (65000, "3 Oy", 90),
+    6: (120000, "6 Oy", 180),
     12: (225000, "12 Oy + 1 Oy Bepul 🔥", 390)
 }
 
@@ -447,30 +448,35 @@ async def show_plans_call(call: CallbackQuery, state: Optional[FSMContext] = Non
         rem_d = campaign.get("remaining_days", 0)
         rem_h = campaign.get("remaining_hours", 0)
         time_text = f"{rem_d} kun, {rem_h} soat" if rem_d > 0 else f"{rem_h} soat"
-        banner += f"🔥 **MAXSUS AKSIYA: {campaign['title']}**\n⏳ Tugashiga: **{time_text} qoldi!**\n\n"
+        title_esc = html.escape(str(campaign.get('title', 'Aksiya')))
+        banner += f"🔥 <b>MAXSUS AKSIYA: {title_esc}</b>\n⏳ Tugashiga: <b>{time_text} qoldi!</b>\n\n"
         
     if applied_promo:
-        banner += f"🎟 **Faol Promokod:** `{applied_promo['code']}` qo'llandi!\n\n"
+        code_esc = html.escape(str(applied_promo.get('code', '')))
+        banner += f"🎟 <b>Faol Promokod:</b> <code>{code_esc}</code> qo'llandi!\n\n"
         
     text = (
-        "💎 **Obuna Tariflari va To'lov**\n\n"
+        "💎 <b>Obuna Tariflari va To'lov</b>\n\n"
         f"{banner}"
-        "📦 **Mavjud tariflar:**\n"
+        "📦 <b>Mavjud tariflar:</b>\n"
     )
     for m in [1, 3, 6, 12]:
         p = plan_prices[m]
-        base_formatted = f"~~({p['base_price']:,} so'm)~~ " if p['is_discounted'] else ""
-        tag_formatted = f" *({p['tag']})*" if p['tag'] else ""
-        text += f"• **{p['title']}:** {p['price']:,} so'm {base_formatted}{tag_formatted}\n"
+        p_title = html.escape(str(p['title']))
+        base_formatted = f"<s>({p['base_price']:,} so'm)</s> " if p['is_discounted'] else ""
+        tag_formatted = f" <i>({html.escape(str(p['tag']))})</i>" if p['tag'] else ""
+        text += f"• <b>{p_title}:</b> {p['price']:,} so'm {base_formatted}{tag_formatted}\n"
         
+    card_number_esc = html.escape(str(PAYMENT_CARD_NUMBER))
+    card_holder_esc = html.escape(str(PAYMENT_CARD_HOLDER))
     text += (
-        "\n💳 **To'lov uchun karta:**\n"
-        f"💳 `{PAYMENT_CARD_NUMBER}`\n"
-        f"👤 {PAYMENT_CARD_HOLDER}\n\n"
+        "\n💳 <b>To'lov uchun karta:</b>\n"
+        f"💳 <code>{card_number_esc}</code>\n"
+        f"👤 {card_holder_esc}\n\n"
         "👇 O'zingizga ma'qul tarifni tanlang yoki promokod kiriting:"
     )
     with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text(text, reply_markup=kb.pricing_plans_kb(plan_prices), parse_mode="Markdown")
+        await call.message.edit_text(text, reply_markup=kb.pricing_plans_kb(plan_prices), parse_mode="HTML")
     await safe_answer(call)
 
 @router.callback_query(F.data.startswith("buy_plan_"))
