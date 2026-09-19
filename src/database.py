@@ -1,7 +1,8 @@
 import aiosqlite
 import json
+import contextlib
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 from src.config import DB_PATH, DEFAULT_TRIAL_DAYS
 from src.logger import setup_logger
 
@@ -72,6 +73,54 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS global_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
+            )
+        ''')
+
+        # Campaign discounts (Timed with duration in days and per-plan rates)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS campaign_discounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                plan_discounts TEXT NOT NULL,
+                max_discount_percent INTEGER DEFAULT 0,
+                start_time TIMESTAMP NOT NULL,
+                end_time TIMESTAMP NOT NULL,
+                duration_days INTEGER NOT NULL,
+                is_active BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Promocodes (Expiry date, usage limits, plan targeting)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS promocodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT UNIQUE NOT NULL,
+                discount_type TEXT NOT NULL,
+                discount_value REAL NOT NULL,
+                plan_discounts TEXT,
+                applicable_plans TEXT DEFAULT 'ALL',
+                max_uses INTEGER DEFAULT 1,
+                used_count INTEGER DEFAULT 0,
+                expires_at TIMESTAMP NOT NULL,
+                is_active BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Promocode usages (Ensures 1 use per user)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS promocode_usages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                promocode_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                discount_type TEXT NOT NULL,
+                discount_value REAL NOT NULL,
+                plan_months INTEGER,
+                used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (promocode_id) REFERENCES promocodes(id),
+                FOREIGN KEY (user_id) REFERENCES users(user_id),
+                UNIQUE(promocode_id, user_id)
             )
         ''')
         
@@ -397,3 +446,254 @@ async def set_global_setting(key: str, value: Any):
             (key, json.dumps(value))
         )
         await db.commit()
+
+# ==================== CAMPAIGN DISCOUNTS ====================
+async def get_active_campaign_discount() -> Optional[Dict[str, Any]]:
+    """Returns currently active campaign discount if within duration and active."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        async with db.execute(
+            """
+            SELECT * FROM campaign_discounts 
+            WHERE is_active = 1 AND ? BETWEEN start_time AND end_time
+            ORDER BY id DESC LIMIT 1
+            """,
+            (now_str,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            data = dict(row)
+            try:
+                data['plan_discounts'] = json.loads(data['plan_discounts'])
+            except Exception:
+                data['plan_discounts'] = {}
+                
+            try:
+                end_dt = datetime.strptime(data['end_time'], '%Y-%m-%d %H:%M:%S')
+                now_dt = datetime.utcnow()
+                remaining_sec = max(0, int((end_dt - now_dt).total_seconds()))
+                data['remaining_seconds'] = remaining_sec
+                data['remaining_days'] = remaining_sec // 86400
+                data['remaining_hours'] = (remaining_sec % 86400) // 3600
+                data['remaining_minutes'] = (remaining_sec % 3600) // 60
+            except Exception:
+                data['remaining_seconds'] = 0
+                data['remaining_days'] = 0
+                data['remaining_hours'] = 0
+                data['remaining_minutes'] = 0
+                
+            return data
+
+async def set_campaign_discount(title: str, plan_discounts: Dict[Any, int], duration_days: int) -> int:
+    """Deactivates previous campaigns and creates a new one with given duration in days."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE campaign_discounts SET is_active = 0')
+        now = datetime.utcnow()
+        end = now + timedelta(days=duration_days)
+        start_str = now.strftime('%Y-%m-%d %H:%M:%S')
+        end_str = end.strftime('%Y-%m-%d %H:%M:%S')
+        norm_discounts = {str(k): int(v) for k, v in plan_discounts.items()}
+        max_pct = max(norm_discounts.values()) if norm_discounts else 0
+        
+        cursor = await db.execute(
+            """
+            INSERT INTO campaign_discounts (title, plan_discounts, max_discount_percent, start_time, end_time, duration_days, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+            """,
+            (title, json.dumps(norm_discounts), max_pct, start_str, end_str, duration_days)
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+async def stop_campaign_discount():
+    """Immediately stops any running campaign discount."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE campaign_discounts SET is_active = 0')
+        await db.commit()
+
+# ==================== PROMOCODES ====================
+async def create_promocode(
+    code: str,
+    discount_type: str,
+    discount_value: float,
+    duration_days: int,
+    max_uses: int = 1,
+    applicable_plans: str = 'ALL',
+    plan_discounts: Optional[Dict[Any, int]] = None
+) -> int:
+    """Creates a new promocode with uppercase code, expiry timestamp, and usage limit."""
+    clean_code = code.strip().upper()
+    now = datetime.utcnow()
+    end = now + timedelta(days=duration_days)
+    end_str = end.strftime('%Y-%m-%d %H:%M:%S')
+    p_disc_str = json.dumps({str(k): int(v) for k, v in plan_discounts.items()}) if plan_discounts else None
+    
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO promocodes (code, discount_type, discount_value, plan_discounts, applicable_plans, max_uses, expires_at, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            (clean_code, discount_type.upper(), discount_value, p_disc_str, applicable_plans, max_uses, end_str)
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+async def get_promocodes() -> List[Dict[str, Any]]:
+    """Returns all promocodes with status badges and usage progress."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('SELECT * FROM promocodes ORDER BY created_at DESC') as cursor:
+            rows = await cursor.fetchall()
+            result = []
+            now = datetime.utcnow()
+            for r in rows:
+                item = dict(r)
+                if item.get('plan_discounts'):
+                    with contextlib.suppress(Exception):
+                        item['plan_discounts'] = json.loads(item['plan_discounts'])
+                        
+                try:
+                    exp_dt = datetime.strptime(item['expires_at'], '%Y-%m-%d %H:%M:%S')
+                    is_expired = now > exp_dt
+                    rem_sec = max(0, int((exp_dt - now).total_seconds()))
+                    item['remaining_days'] = rem_sec // 86400
+                    item['remaining_hours'] = (rem_sec % 86400) // 3600
+                except Exception:
+                    is_expired = False
+                    item['remaining_days'] = 0
+                    item['remaining_hours'] = 0
+                
+                is_limit_reached = (item['max_uses'] > 0 and item['used_count'] >= item['max_uses'])
+                item['is_expired'] = is_expired
+                item['is_limit_reached'] = is_limit_reached
+                
+                if not item['is_active']:
+                    item['status_badge'] = "PAUSED"
+                elif is_expired:
+                    item['status_badge'] = "EXPIRED"
+                elif is_limit_reached:
+                    item['status_badge'] = "LIMIT_REACHED"
+                else:
+                    item['status_badge'] = "ACTIVE"
+                    
+                result.append(item)
+            return result
+
+async def get_promocode_by_code(code: str) -> Optional[Dict[str, Any]]:
+    """Fetches a promocode by case-insensitive code."""
+    clean_code = code.strip().upper()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('SELECT * FROM promocodes WHERE UPPER(code) = ?', (clean_code,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            if item.get('plan_discounts'):
+                with contextlib.suppress(Exception):
+                    item['plan_discounts'] = json.loads(item['plan_discounts'])
+            return item
+
+async def toggle_promocode_status(promo_id: int, is_active: bool):
+    """Enables or pauses a promocode."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE promocodes SET is_active = ? WHERE id = ?', (1 if is_active else 0, promo_id))
+        await db.commit()
+
+async def delete_promocode(promo_id: int):
+    """Deletes a promocode and its usage records."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('DELETE FROM promocode_usages WHERE promocode_id = ?', (promo_id,))
+        await db.execute('DELETE FROM promocodes WHERE id = ?', (promo_id,))
+        await db.commit()
+
+async def redeem_promocode(user_id: int, code: str, target_plan: Optional[int] = None) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """
+    Validates and redeems a promocode for a user.
+    If DAYS type: grants free VIP days immediately and records usage.
+    If PERCENT / FIXED type: validates eligibility and returns promo for checkout calculation.
+    """
+    clean_code = code.strip().upper()
+    promo = await get_promocode_by_code(clean_code)
+    if not promo:
+        return False, "❌ Bunday promokod topilmadi. Kodni tekshirib qaytadan kiriting.", None
+        
+    if not promo['is_active']:
+        return False, "⚠️ Ushbu promokod hozirda to'xtatilgan yoki faol emas.", None
+        
+    # Expiry verification
+    try:
+        exp_dt = datetime.strptime(promo['expires_at'], '%Y-%m-%d %H:%M:%S')
+        if datetime.utcnow() > exp_dt:
+            return False, "❌ Ushbu promokodning amal qilish muddati tugagan.", None
+    except Exception:
+        pass
+        
+    # Usage limit verification
+    if promo['max_uses'] > 0 and promo['used_count'] >= promo['max_uses']:
+        return False, "❌ Ushbu promokoddan foydalanish limiti tugagan (barcha limitlar ishlatib bo'lingan).", None
+        
+    # Anti-abuse: verify user has not redeemed this promo already
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            'SELECT id FROM promocode_usages WHERE promocode_id = ? AND user_id = ?',
+            (promo['id'], user_id)
+        ) as cursor:
+            if await cursor.fetchone():
+                return False, "⚠️ Siz bu promokoddan avval foydalangansiz!", None
+                
+    # Plan targeting verification
+    applicable = promo.get('applicable_plans', 'ALL')
+    if target_plan and applicable != 'ALL':
+        allowed = [p.strip() for p in applicable.split(',')]
+        if str(target_plan) not in allowed:
+            return False, f"⚠️ Ushbu promokod faqat {applicable} oylik tariflar uchun amal qiladi.", None
+
+    # If promo gives direct VIP Days
+    if promo['discount_type'] == 'DAYS':
+        days = int(promo['discount_value'])
+        new_expiry = await update_user_subscription(user_id, days)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                INSERT INTO promocode_usages (promocode_id, user_id, discount_type, discount_value, used_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (promo['id'], user_id, promo['discount_type'], promo['discount_value'])
+            )
+            await db.execute('UPDATE promocodes SET used_count = used_count + 1 WHERE id = ?', (promo['id'],))
+            await db.commit()
+            
+        return True, f"🎉 Tabriklaymiz! `{clean_code}` promokodi faollashtirildi!\nSizga **+{days} kun bepul VIP obuna** taqdim etildi.\n📅 Yangi amal qilish muddati: `{new_expiry}` gacha.", promo
+        
+    return True, f"🎟 `{clean_code}` promokodi muvaffaqiyatli qabul qilindi!", promo
+
+async def record_promocode_usage(promocode_id: int, user_id: int, plan_months: int):
+    """Records that a user finalized a payment using a PERCENT or FIXED promocode."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            'SELECT id FROM promocode_usages WHERE promocode_id = ? AND user_id = ?',
+            (promocode_id, user_id)
+        ) as cursor:
+            if await cursor.fetchone():
+                return
+                
+        async with db.execute('SELECT discount_type, discount_value FROM promocodes WHERE id = ?', (promocode_id,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return
+            d_type, d_val = row[0], row[1]
+            
+        await db.execute(
+            """
+            INSERT INTO promocode_usages (promocode_id, user_id, discount_type, discount_value, plan_months, used_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (promocode_id, user_id, d_type, d_val, plan_months)
+        )
+        await db.execute('UPDATE promocodes SET used_count = used_count + 1 WHERE id = ?', (promocode_id,))
+        await db.commit()
+

@@ -30,6 +30,9 @@ class AuthStates(StatesGroup):
 class PaymentStates(StatesGroup):
     waiting_for_cheque = State()
 
+class PromoStates(StatesGroup):
+    waiting_for_promocode = State()
+
 class BotStates(StatesGroup):
     waiting_for_source_chat = State()
     waiting_for_custom_timing = State()
@@ -45,6 +48,54 @@ PRICING_PLANS = {
     6: (120000, "6 Oy (-20%)", 180),
     12: (225000, "12 Oy + 1 Oy Bepul 🔥", 390)
 }
+
+def calculate_effective_plan_prices(campaign: Optional[Dict[str, Any]] = None, promo: Optional[Dict[str, Any]] = None) -> Dict[int, Dict[str, Any]]:
+    """
+    Calculates final prices, original prices, and badges for each plan (1, 3, 6, 12).
+    Respects per-plan discounts from active campaign and applied promocode.
+    """
+    results = {}
+    camp_discounts = campaign.get("plan_discounts", {}) if campaign else {}
+    
+    promo_type = promo.get("discount_type") if promo else None
+    promo_val = float(promo.get("discount_value", 0)) if promo else 0
+    promo_plans = promo.get("applicable_plans", "ALL") if promo else "ALL"
+    promo_plan_list = [p.strip() for p in promo_plans.split(",")] if promo_plans != "ALL" else ["1", "3", "6", "12"]
+    
+    for months, (base_price, title, bonus_days) in PRICING_PLANS.items():
+        price = base_price
+        tags = []
+        
+        # 1. Campaign discount (e.g. 12% on 3m, 20% on 12m)
+        m_str = str(months)
+        camp_pct = int(camp_discounts.get(m_str, 0))
+        if camp_pct > 0:
+            discount_amount = int(base_price * (camp_pct / 100.0))
+            price = max(1000, price - discount_amount)
+            tags.append(f"-{camp_pct}% aksiya")
+            
+        # 2. Promocode discount (if applicable to this plan)
+        if promo and m_str in promo_plan_list:
+            if promo_type == "PERCENT":
+                p_amount = int(price * (promo_val / 100.0))
+                price = max(1000, price - p_amount)
+                tags.append(f"-{int(promo_val)}% promo")
+            elif promo_type == "FIXED":
+                price = max(1000, price - int(promo_val))
+                tags.append(f"-{int(promo_val):,} so'm promo")
+                
+        price = int(round(price / 100.0) * 100)
+        tag_str = ", ".join(tags)
+        results[months] = {
+            "title": title,
+            "base_price": base_price,
+            "price": price,
+            "tag": tag_str,
+            "is_discounted": price < base_price,
+            "bonus_days": bonus_days
+        }
+        
+    return results
 
 # ==================== HELPER FUNCTIONS ====================
 async def safe_answer(call: CallbackQuery, text: str = None, show_alert: bool = False):
@@ -348,39 +399,69 @@ async def logout_confirmed_call(call: CallbackQuery, bot: Bot, state: FSMContext
 
 # ==================== PRICING & PAYMENT APPROVAL ====================
 @router.callback_query(F.data == "show_plans")
-async def show_plans_call(call: CallbackQuery):
+async def show_plans_call(call: CallbackQuery, state: Optional[FSMContext] = None):
     user_id = call.from_user.id
-    user = await db.get_user(user_id)
-    is_lifetime = user.get('is_lifetime_discount', 1) if user else 1
+    campaign = await db.get_active_campaign_discount()
+    applied_promo = None
+    if state:
+        state_data = await state.get_data()
+        applied_promo = state_data.get("applied_promo")
+        
+    plan_prices = calculate_effective_plan_prices(campaign, applied_promo)
     
+    banner = ""
+    if campaign:
+        rem_d = campaign.get("remaining_days", 0)
+        rem_h = campaign.get("remaining_hours", 0)
+        time_text = f"{rem_d} kun, {rem_h} soat" if rem_d > 0 else f"{rem_h} soat"
+        banner += f"🔥 **MAXSUS AKSIYA: {campaign['title']}**\n⏳ Tugashiga: **{time_text} qoldi!**\n\n"
+        
+    if applied_promo:
+        banner += f"🎟 **Faol Promokod:** `{applied_promo['code']}` qo'llandi!\n\n"
+        
     text = (
         "💎 **Obuna Tariflari va To'lov**\n\n"
-        "🔥 **Startap aksiyasi:** Hozir obuna bo'ling va butun umr 25,000 so'mlik boshlang'ich narxni saqlab qoling!\n\n"
+        f"{banner}"
         "📦 **Mavjud tariflar:**\n"
-        "• **1 Oy:** 25,000 so'm ~~(40,000 so'm)~~ (38% chegirma)\n"
-        "• **3 Oy:** 65,000 so'm ~~(108,000 so'm)~~ (10% qo'shimcha)\n"
-        "• **6 Oy:** 120,000 so'm ~~(192,000 so'm)~~ (20% qo'shimcha)\n"
-        "• **12 Oy:** 225,000 so'm + **1 OY BEPUL** (jami 13 oy!)\n\n"
-        "💳 **To'lov uchun karta:**\n"
+    )
+    for m in [1, 3, 6, 12]:
+        p = plan_prices[m]
+        base_formatted = f"~~({p['base_price']:,} so'm)~~ " if p['is_discounted'] else ""
+        tag_formatted = f" *({p['tag']})*" if p['tag'] else ""
+        text += f"• **{p['title']}:** {p['price']:,} so'm {base_formatted}{tag_formatted}\n"
+        
+    text += (
+        "\n💳 **To'lov uchun karta:**\n"
         f"💳 `{PAYMENT_CARD_NUMBER}`\n"
         f"👤 {PAYMENT_CARD_HOLDER}\n\n"
-        "👇 O'zingizga ma'qul tarifni tanlang:"
+        "👇 O'zingizga ma'qul tarifni tanlang yoki promokod kiriting:"
     )
     with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text(text, reply_markup=kb.pricing_plans_kb(is_lifetime), parse_mode="Markdown")
+        await call.message.edit_text(text, reply_markup=kb.pricing_plans_kb(plan_prices), parse_mode="Markdown")
     await safe_answer(call)
 
 @router.callback_query(F.data.startswith("buy_plan_"))
 async def select_plan_call(call: CallbackQuery, state: FSMContext):
     months = int(call.data.split("_")[2])
-    plan_info = PRICING_PLANS.get(months, (25000, "1 Oy", 30))
-    amount_uzs, title, _ = plan_info
+    campaign = await db.get_active_campaign_discount()
+    state_data = await state.get_data()
+    applied_promo = state_data.get("applied_promo")
+    
+    plan_prices = calculate_effective_plan_prices(campaign, applied_promo)
+    plan_info = plan_prices.get(months, {"price": 25000, "title": f"{months} Oy", "tag": ""})
+    amount_uzs = plan_info["price"]
+    title = plan_info["title"]
     
     await state.set_state(PaymentStates.waiting_for_cheque)
-    await state.update_data(plan_months=months, amount_uzs=amount_uzs)
+    await state.update_data(
+        plan_months=months,
+        amount_uzs=amount_uzs,
+        applied_promo=applied_promo
+    )
     
+    discount_note = f"\n🏷 **Chegirma:** {plan_info['tag']}" if plan_info.get("tag") else ""
     text = (
-        f"🧾 **Tarif tanlandi: {title}**\n\n"
+        f"🧾 **Tarif tanlandi: {title}**{discount_note}\n\n"
         f"💰 **To'lov summasi:** `{amount_uzs:,}` so'm\n\n"
         f"💳 **To'lov kartasi:**\n"
         f"💳 `{PAYMENT_CARD_NUMBER}`\n"
@@ -397,6 +478,7 @@ async def process_cheque_photo(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     plan_months = data.get("plan_months", 1)
     amount_uzs = data.get("amount_uzs", 25000)
+    applied_promo = data.get("applied_promo")
     
     # Get highest resolution photo
     photo_file_id = message.photo[-1].file_id
@@ -408,6 +490,10 @@ async def process_cheque_photo(message: Message, state: FSMContext, bot: Bot):
         amount_uzs=amount_uzs,
         receipt_file_id=photo_file_id
     )
+    
+    # Record promo usage if a discount promo was used
+    if applied_promo and applied_promo.get("id"):
+        await db.record_promocode_usage(applied_promo["id"], user_id, plan_months)
     
     await state.clear()
     
@@ -422,12 +508,13 @@ async def process_cheque_photo(message: Message, state: FSMContext, bot: Bot):
     full_name = user.get('full_name', message.from_user.full_name)
     username = user.get('username') or 'Mavjud emas'
     
+    promo_line = f"\n🎟 **Promokod:** `{applied_promo['code']}`" if applied_promo else ""
     admin_caption = (
         f"🧾 **Yangi To'lov Cheki (ID: #{request_id})**\n\n"
         f"👤 **Mijoz:** {full_name}\n"
         f"🆔 **User ID:** `{user_id}`\n"
         f"🔗 **Username:** @{username}\n"
-        f"📦 **Tanlangan tarif:** {plan_months} Oy\n"
+        f"📦 **Tanlangan tarif:** {plan_months} Oy{promo_line}\n"
         f"💰 **Summa:** {amount_uzs:,} so'm\n"
         f"🕒 **Vaqt:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
     )
@@ -1176,4 +1263,188 @@ async def admin_finance_cmd(message: Message):
         
     text += "\n🌐 Batafsil ma'lumot va cheklar tarixi veb-panelda: `/finance` sahifasida."
     await message.answer(text, parse_mode="Markdown")
+
+# ==================== PROMOCODES & DISCOUNT CAMPAIGNS ====================
+@router.callback_query(F.data == "enter_promocode")
+async def enter_promocode_call(call: CallbackQuery, state: FSMContext):
+    await state.set_state(PromoStates.waiting_for_promocode)
+    text = (
+        "🎟 **Promokod kiritish**\n\n"
+        "Agar sizda chegirma yoki bepul VIP kunlar beruvchi promokod bo'lsa, "
+        "iltimos, uni quyida yozib yuboring (masalan: `BAHOR2026`):"
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb.cancel_promo_kb(), parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.message(PromoStates.waiting_for_promocode, F.text)
+async def process_promocode_input(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    code = message.text.strip()
+    success, msg, promo = await db.redeem_promocode(user_id, code)
+    if not success:
+        await message.answer(f"{msg}\n\nIltimos, qaytadan kiriting yoki bekor qiling:", reply_markup=kb.cancel_promo_kb())
+        return
+        
+    if promo and promo.get("discount_type") == "DAYS":
+        await state.clear()
+        await message.answer(msg, reply_markup=kb.back_kb(), parse_mode="Markdown")
+        return
+        
+    # PERCENT or FIXED discount applied to cart
+    await state.update_data(applied_promo=promo)
+    campaign = await db.get_active_campaign_discount()
+    plan_prices = calculate_effective_plan_prices(campaign, promo)
+    
+    text = (
+        f"{msg}\n\n"
+        "👇 Chegirma muvaffaqiyatli hisoblandi! O'zingizga ma'qul tarifni tanlang:"
+    )
+    await message.answer(text, reply_markup=kb.pricing_plans_kb(plan_prices), parse_mode="Markdown")
+
+@router.message(Command("promocode"))
+@router.message(Command("promo"))
+async def promo_command(message: Message, state: FSMContext):
+    parts = message.text.strip().split()
+    user_id = message.from_user.id
+    if len(parts) > 1:
+        code = parts[1]
+        success, msg, promo = await db.redeem_promocode(user_id, code)
+        if not success:
+            await message.answer(msg)
+            return
+        if promo and promo.get("discount_type") == "DAYS":
+            await message.answer(msg, reply_markup=kb.back_kb(), parse_mode="Markdown")
+            return
+        await state.update_data(applied_promo=promo)
+        campaign = await db.get_active_campaign_discount()
+        plan_prices = calculate_effective_plan_prices(campaign, promo)
+        await message.answer(f"{msg}\n\n👇 Tariflar:", reply_markup=kb.pricing_plans_kb(plan_prices), parse_mode="Markdown")
+    else:
+        await state.set_state(PromoStates.waiting_for_promocode)
+        await message.answer(
+            "🎟 **Promokod kiritish**\n\nIltimos, promokodingizni yozib yuboring:",
+            reply_markup=kb.cancel_promo_kb(),
+            parse_mode="Markdown"
+        )
+
+# ==================== SUPERADMIN DISCOUNT & PROMO COMMANDS ====================
+@router.message(Command("discounts"))
+@router.message(Command("promos"))
+async def admin_discounts_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    campaign = await db.get_active_campaign_discount()
+    promos = await db.get_promocodes()
+    
+    text = "🏷 **Chegirmalar va Promokodlar Boshqaruvi**\n\n"
+    if campaign:
+        text += (
+            f"🔥 **Faol Aksiya:** `{campaign['title']}`\n"
+            f"⏳ Tugashiga: `{campaign.get('remaining_days', 0)} kun, {campaign.get('remaining_hours', 0)} soat`\n"
+            f"📊 Tariflar chegirmasi: `{campaign.get('plan_discounts')}`\n"
+            "To'xtatish uchun: `/stopdiscount`\n\n"
+        )
+    else:
+        text += "⚪️ **Hozirda faol aksiya yo'q.**\nBoshlash: `/setdiscount <KUN> <1m%> <3m%> <6m%> <12m%> [NOMI]`\n\n"
+        
+    text += f"🎟 **Promokodlar ({len(promos)} ta):**\n"
+    for p in promos[:5]:
+        val_str = f"+{int(p['discount_value'])} kun" if p['discount_type'] == 'DAYS' else f"-{int(p['discount_value'])}%"
+        text += f"• `{p['code']}`: {val_str} ({p['used_count']}/{p['max_uses']} ta) — {p['status_badge']}\n"
+        
+    text += "\n🌐 Veb-paneldan boshqarish: `/discounts` sahifasida."
+    await message.answer(text, parse_mode="Markdown")
+
+@router.message(Command("setdiscount"))
+async def admin_setdiscount_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 3:
+        await message.answer(
+            "⚠️ **Noto'g'ri format!**\n\n"
+            "Formatlar:\n"
+            "1. Yagona: `/setdiscount <KUN> <FOIZ%> [NOMI]`\n"
+            "Masalan: `/setdiscount 3 20 Bahorgi aksiya`\n\n"
+            "2. Har bir tarifga: `/setdiscount <KUN> <1m%> <3m%> <6m%> <12m%> [NOMI]`\n"
+            "Masalan: `/setdiscount 3 0 12 15 20 Katta chegirma`",
+            parse_mode="Markdown"
+        )
+        return
+        
+    try:
+        duration_days = int(parts[1])
+        if len(parts) >= 6 and parts[2].isdigit() and parts[3].isdigit():
+            p1 = int(parts[2])
+            p3 = int(parts[3])
+            p6 = int(parts[4])
+            p12 = int(parts[5])
+            title = " ".join(parts[6:]) if len(parts) > 6 else "Maxsus Aksiya"
+            plan_discounts = {"1": p1, "3": p3, "6": p6, "12": p12}
+        else:
+            flat_pct = int(parts[2].replace("%", ""))
+            title = " ".join(parts[3:]) if len(parts) > 3 else "Maxsus Chegirma"
+            plan_discounts = {"1": flat_pct, "3": flat_pct, "6": flat_pct, "12": flat_pct}
+            
+        camp_id = await db.set_campaign_discount(title, plan_discounts, duration_days)
+        await message.answer(
+            f"✅ **Aksiya muvaffaqiyatli ishga tushirildi!** (ID: #{camp_id})\n\n"
+            f"🏷 Nomi: **{title}**\n"
+            f"⏳ Muddat: **{duration_days} kun**\n"
+            f"📊 Chegirmalar: `{plan_discounts}`",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await message.answer(f"❌ Xatolik: {e}")
+
+@router.message(Command("stopdiscount"))
+async def admin_stopdiscount_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await db.stop_campaign_discount()
+    await message.answer("🛑 **Faol aksiya to'xtatildi.** Barcha tariflar standart holatga qaytarildi.")
+
+@router.message(Command("newpromo"))
+async def admin_newpromo_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 6:
+        await message.answer(
+            "⚠️ **Format:** `/newpromo <KOD> <TURI: days|percent|fixed> <QIYMATI> <MUDDAT_KUN> <LIMIT> [TARIFLAR]`\n\n"
+            "Misollar:\n"
+            "• `/newpromo BAHOR days 7 14 50` (+7 kun bepul VIP, 14 kun, 50 marta)\n"
+            "• `/newpromo TAXI20 percent 20 7 100 6,12` (20% chegirma, faqat 6 va 12 oylik tariflarga)",
+            parse_mode="Markdown"
+        )
+        return
+        
+    try:
+        code = parts[1].upper()
+        d_type = parts[2].upper()
+        d_val = float(parts[3])
+        dur_days = int(parts[4])
+        max_uses = int(parts[5])
+        plans = parts[6] if len(parts) > 6 else "ALL"
+        
+        promo_id = await db.create_promocode(
+            code=code,
+            discount_type=d_type,
+            discount_value=d_val,
+            duration_days=dur_days,
+            max_uses=max_uses,
+            applicable_plans=plans
+        )
+        await message.answer(
+            f"✅ **Promokod yaratildi!** (ID: #{promo_id})\n\n"
+            f"🎟 Kod: `{code}`\n"
+            f"🎁 Tur: **{d_type}** ({d_val})\n"
+            f"⏳ Muddat: **{dur_days} kun**\n"
+            f"👥 Limit: **{max_uses} ta**\n"
+            f"📦 Tariflar: `{plans}`",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await message.answer(f"❌ Xatolik: {e}")
 

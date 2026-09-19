@@ -71,16 +71,37 @@ def logout_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 # ==================== PRICING & SUBSCRIPTION ====================
-def pricing_plans_kb(is_lifetime_discount: bool = True) -> InlineKeyboardMarkup:
-    # 1m (25k), 3m (65k), 6m (120k), 12m (225k UZS)
-    keyboard = [
-        [InlineKeyboardButton(text="1️⃣ 1 Oy — 25,000 so'm (38% chegirma)", callback_data="buy_plan_1")],
-        [InlineKeyboardButton(text="2️⃣ 3 Oy — 65,000 so'm (-10% qo'shimcha)", callback_data="buy_plan_3")],
-        [InlineKeyboardButton(text="3️⃣ 6 Oy — 120,000 so'm (-20% qo'shimcha)", callback_data="buy_plan_6")],
-        [InlineKeyboardButton(text="4️⃣ 12 Oy + 1 Oy Bepul — 225,000 so'm 🔥", callback_data="buy_plan_12")],
-        [InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")]
-    ]
+def pricing_plans_kb(plan_details: Any = None) -> InlineKeyboardMarkup:
+    # Dynamic or default plans: 1m (25k), 3m (65k), 6m (120k), 12m (225k UZS)
+    keyboard = []
+    
+    if isinstance(plan_details, dict):
+        for months in [1, 3, 6, 12]:
+            info = plan_details.get(months)
+            if info:
+                title = info.get("title", f"{months} Oy")
+                price = info.get("price", 25000)
+                tag = info.get("tag", "")
+                tag_str = f" ({tag})" if tag else ""
+                icon = {1: "1️⃣", 3: "2️⃣", 6: "3️⃣", 12: "4️⃣"}.get(months, "📦")
+                btn_text = f"{icon} {title} — {price:,} so'm{tag_str}"
+                keyboard.append([InlineKeyboardButton(text=btn_text, callback_data=f"buy_plan_{months}")])
+    else:
+        keyboard = [
+            [InlineKeyboardButton(text="1️⃣ 1 Oy — 25,000 so'm (38% chegirma)", callback_data="buy_plan_1")],
+            [InlineKeyboardButton(text="2️⃣ 3 Oy — 65,000 so'm (-10% qo'shimcha)", callback_data="buy_plan_3")],
+            [InlineKeyboardButton(text="3️⃣ 6 Oy — 120,000 so'm (-20% qo'shimcha)", callback_data="buy_plan_6")],
+            [InlineKeyboardButton(text="4️⃣ 12 Oy + 1 Oy Bepul — 225,000 so'm 🔥", callback_data="buy_plan_12")]
+        ]
+        
+    keyboard.append([InlineKeyboardButton(text="🎟 Promokod kiritish", callback_data="enter_promocode")])
+    keyboard.append([InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def cancel_promo_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Bekor qilish va orqaga", callback_data="show_plans")]
+    ])
 
 def cancel_payment_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[

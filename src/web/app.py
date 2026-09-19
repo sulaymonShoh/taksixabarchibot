@@ -43,6 +43,22 @@ class ApprovePaymentRequest(BaseModel):
     user_id: int
     plan_months: int
 
+class CampaignDiscountRequest(BaseModel):
+    title: str
+    duration_days: int
+    plan_discounts: Dict[str, int]
+
+class CreatePromocodeRequest(BaseModel):
+    code: str
+    discount_type: str
+    discount_value: float
+    duration_days: int
+    max_uses: int = 1
+    applicable_plans: str = "ALL"
+
+class TogglePromoRequest(BaseModel):
+    is_active: bool
+
 class BroadcastRequest(BaseModel):
     text: str
 
@@ -183,6 +199,62 @@ async def finance_view(request: Request, username: str = Depends(verify_credenti
 @app.get("/api/finance/stats")
 async def api_finance_stats(username: str = Depends(verify_credentials)):
     return JSONResponse(await db.get_earnings_stats())
+
+@app.get("/discounts", response_class=HTMLResponse)
+async def discounts_view(request: Request, username: str = Depends(verify_credentials)):
+    campaign = await db.get_active_campaign_discount()
+    promos = await db.get_promocodes()
+    pending = await db.get_pending_payment_requests()
+    return templates.TemplateResponse(request=request, name="discounts.html", context={
+        "active_page": "discounts",
+        "campaign": campaign,
+        "promocodes": promos,
+        "pending_count": len(pending)
+    })
+
+@app.post("/api/discounts/campaign")
+async def api_set_campaign(req: CampaignDiscountRequest, username: str = Depends(verify_credentials)):
+    try:
+        camp_id = await db.set_campaign_discount(req.title, req.plan_discounts, req.duration_days)
+        return JSONResponse({"success": True, "campaign_id": camp_id})
+    except Exception as e:
+        logger.error(f"Failed to set campaign discount: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/api/discounts/campaign/stop")
+async def api_stop_campaign(username: str = Depends(verify_credentials)):
+    await db.stop_campaign_discount()
+    return JSONResponse({"success": True})
+
+@app.get("/api/promocodes")
+async def api_list_promocodes(username: str = Depends(verify_credentials)):
+    return JSONResponse(await db.get_promocodes())
+
+@app.post("/api/promocodes")
+async def api_create_promocode(req: CreatePromocodeRequest, username: str = Depends(verify_credentials)):
+    try:
+        promo_id = await db.create_promocode(
+            code=req.code,
+            discount_type=req.discount_type,
+            discount_value=req.discount_value,
+            duration_days=req.duration_days,
+            max_uses=req.max_uses,
+            applicable_plans=req.applicable_plans
+        )
+        return JSONResponse({"success": True, "promocode_id": promo_id})
+    except Exception as e:
+        logger.error(f"Failed to create promocode: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+@app.post("/api/promocodes/{promo_id}/toggle")
+async def api_toggle_promocode(promo_id: int, req: TogglePromoRequest, username: str = Depends(verify_credentials)):
+    await db.toggle_promocode_status(promo_id, req.is_active)
+    return JSONResponse({"success": True})
+
+@app.delete("/api/promocodes/{promo_id}")
+async def api_delete_promocode(promo_id: int, username: str = Depends(verify_credentials)):
+    await db.delete_promocode(promo_id)
+    return JSONResponse({"success": True})
 
 @app.get("/miniapp", response_class=HTMLResponse)
 async def miniapp_view(request: Request):

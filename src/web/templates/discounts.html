@@ -1,0 +1,502 @@
+{% extends "base.html" %}
+{% block title %}Chegirmalar & Promolar — Taksi Xabarchi{% endblock %}
+{% block content %}
+<div class="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-8">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <h2 class="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Chegirmalar & Promokodlar</h2>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Obuna tariflariga muddatli aksiyalar belgilash va promokodlar tizimini boshqarish</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button onclick="openPromoModal()" class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-semibold shadow-sm transition flex items-center space-x-2">
+                <i class="fa-solid fa-plus text-xs"></i>
+                <span>Yangi Promokod</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Active Campaign Card & Campaign Config Form -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Active Campaign Status Card -->
+        <div class="lg:col-span-1 bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 backdrop-blur-sm shadow-sm flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Joriy Aksiya Holati</span>
+                    {% if campaign %}
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 animate-pulse"></span> FAOL AKSIYA
+                    </span>
+                    {% else %}
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-500/10 text-slate-500 border border-slate-500/20">
+                        AKSIYA YO'Q
+                    </span>
+                    {% endif %}
+                </div>
+
+                {% if campaign %}
+                <div class="mt-4">
+                    <h3 class="text-xl font-bold text-slate-900 dark:text-white">{{ campaign.title }}</h3>
+                    <div class="flex items-center space-x-2 text-xs text-amber-600 dark:text-amber-400 font-medium mt-1">
+                        <i class="fa-solid fa-stopwatch"></i>
+                        <span>Tugashiga: <strong>{{ campaign.remaining_days }} kun, {{ campaign.remaining_hours }} soat</strong> qoldi</span>
+                    </div>
+                </div>
+
+                <!-- Per-Plan Rates Breakdown -->
+                <div class="mt-5 space-y-2 border-t border-slate-100 dark:border-slate-800/80 pt-4">
+                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tariflar chegirmasi:</div>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="bg-slate-50 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between">
+                            <span class="text-slate-500">1 Oy:</span>
+                            <span class="font-bold text-slate-900 dark:text-white font-mono">-{{ campaign.plan_discounts.get('1', 0) }}%</span>
+                        </div>
+                        <div class="bg-slate-50 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between">
+                            <span class="text-slate-500">3 Oy:</span>
+                            <span class="font-bold text-amber-500 font-mono">-{{ campaign.plan_discounts.get('3', 0) }}%</span>
+                        </div>
+                        <div class="bg-slate-50 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between">
+                            <span class="text-slate-500">6 Oy:</span>
+                            <span class="font-bold text-amber-500 font-mono">-{{ campaign.plan_discounts.get('6', 0) }}%</span>
+                        </div>
+                        <div class="bg-slate-50 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between">
+                            <span class="text-slate-500">12 Oy:</span>
+                            <span class="font-bold text-emerald-500 font-mono">-{{ campaign.plan_discounts.get('12', 0) }}%</span>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="py-8 text-center text-slate-400 dark:text-slate-500 text-sm">
+                    <i class="fa-solid fa-tag text-3xl mb-2 opacity-40"></i>
+                    <p>Hozirda foydalanuvchilar barcha obuna tariflarini standart narxlarda xarid qilishmoqda.</p>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if campaign %}
+            <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800/80">
+                <button onclick="stopCampaign()" class="w-full py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/20 text-xs font-semibold transition flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-ban"></i>
+                    <span>Aksiyani to'xtatish (Standart narxga qaytish)</span>
+                </button>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Launch New Campaign Form -->
+        <div class="lg:col-span-2 bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 backdrop-blur-sm shadow-sm">
+            <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                <i class="fa-solid fa-bullhorn text-amber-500"></i>
+                <span>Yangi Chegirma Aksiyasini Boshlash</span>
+            </h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Belgilangan muddat davomida botda avtomatik aksiyali narxlar ko'rsatiladi va muddat tugashi bilan standart holatga qaytadi.</p>
+
+            <form id="campaignForm" onsubmit="handleCampaignSubmit(event)" class="mt-5 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Aksiya Nomi / Sarlavhasi</label>
+                        <input type="text" id="camp_title" required placeholder="Masalan: Navro'z maxsus aksiyasi" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-amber-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Amal Qilish Muddati (kunlarda)</label>
+                        <input type="number" id="camp_duration" required min="1" max="365" value="3" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-amber-500">
+                    </div>
+                </div>
+
+                <!-- Per-Plan Discount Inputs -->
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Har Bir Tarif Uchun Alohida Chegirma Foizi (%):</label>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div class="bg-slate-50 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span class="text-xs font-semibold text-slate-500">1 Oy (25,000)</span>
+                            <div class="mt-1.5 flex items-center space-x-1">
+                                <input type="number" id="disc_1" min="0" max="100" value="0" class="w-full px-2 py-1 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white font-mono focus:border-amber-500">
+                                <span class="text-xs text-slate-400 font-mono">%</span>
+                            </div>
+                        </div>
+                        <div class="bg-slate-50 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span class="text-xs font-semibold text-slate-500">3 Oy (65,000)</span>
+                            <div class="mt-1.5 flex items-center space-x-1">
+                                <input type="number" id="disc_3" min="0" max="100" value="12" class="w-full px-2 py-1 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white font-mono focus:border-amber-500">
+                                <span class="text-xs text-slate-400 font-mono">%</span>
+                            </div>
+                        </div>
+                        <div class="bg-slate-50 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span class="text-xs font-semibold text-slate-500">6 Oy (120,000)</span>
+                            <div class="mt-1.5 flex items-center space-x-1">
+                                <input type="number" id="disc_6" min="0" max="100" value="15" class="w-full px-2 py-1 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white font-mono focus:border-amber-500">
+                                <span class="text-xs text-slate-400 font-mono">%</span>
+                            </div>
+                        </div>
+                        <div class="bg-slate-50 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span class="text-xs font-semibold text-slate-500">12 Oy (225,000)</span>
+                            <div class="mt-1.5 flex items-center space-x-1">
+                                <input type="number" id="disc_12" min="0" max="100" value="20" class="w-full px-2 py-1 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white font-mono focus:border-amber-500">
+                                <span class="text-xs text-slate-400 font-mono">%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-2 flex justify-end">
+                    <button type="submit" class="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-semibold shadow-sm transition flex items-center space-x-2">
+                        <i class="fa-solid fa-play text-xs"></i>
+                        <span>Aksiyani Faollashtirish</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Promocodes Management Table -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl backdrop-blur-sm shadow-sm overflow-hidden">
+        <div class="p-5 border-b border-slate-200 dark:border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+                <h3 class="text-base font-bold text-slate-900 dark:text-white">Promokodlar Ro'yxati</h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Yaratilgan barcha promokodlar, ularning amal qilish muddati va ishlatilish statistikasi</p>
+            </div>
+            <div class="flex items-center space-x-3">
+                <span class="text-xs font-medium px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Jami: <strong>{{ promocodes|length }}</strong> ta promokod
+                </span>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+                <thead>
+                    <tr class="bg-slate-50 dark:bg-slate-900/50 text-slate-400 text-xs font-semibold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                        <th class="p-4">Promokod</th>
+                        <th class="p-4">Mukofot / Tur</th>
+                        <th class="p-4">Tariflar</th>
+                        <th class="p-4">Ishlatilish Ko'rsatkichi</th>
+                        <th class="p-4">Amal Qilish Muddati</th>
+                        <th class="p-4">Holat</th>
+                        <th class="p-4 text-right">Amallar</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60">
+                    {% for promo in promocodes %}
+                    <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition">
+                        <td class="p-4">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-mono font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs tracking-wider">
+                                    {{ promo.code }}
+                                </span>
+                            </div>
+                        </td>
+                        <td class="p-4">
+                            {% if promo.discount_type == 'DAYS' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                <i class="fa-solid fa-gift mr-1 text-[10px]"></i> +{{ promo.discount_value|int }} kun VIP
+                            </span>
+                            {% elif promo.discount_type == 'PERCENT' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                <i class="fa-solid fa-percent mr-1 text-[10px]"></i> -{{ promo.discount_value|int }}% chegirma
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                                <i class="fa-solid fa-money-bill mr-1 text-[10px]"></i> -{{ "{:,}".format(promo.discount_value|int) }} so'm
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="p-4 text-xs text-slate-600 dark:text-slate-400 font-mono">
+                            {% if promo.applicable_plans == 'ALL' %}
+                            <span class="text-slate-500">Barcha tariflar</span>
+                            {% else %}
+                            <span class="text-amber-500 font-bold">{{ promo.applicable_plans }} oylik</span>
+                            {% endif %}
+                        </td>
+                        <td class="p-4">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs font-mono font-bold text-slate-900 dark:text-white">
+                                    {{ promo.used_count }} / {% if promo.max_uses > 0 %}{{ promo.max_uses }}{% else %}∞{% endif %}
+                                </span>
+                                {% if promo.max_uses > 0 %}
+                                <div class="w-16 bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                                    <div class="bg-amber-500 h-1.5 rounded-full" style="width: {{ [100, (promo.used_count / promo.max_uses * 100)|round]|min }}%"></div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td class="p-4 text-xs text-slate-500 dark:text-slate-400">
+                            <div>{{ promo.expires_at }}</div>
+                            {% if not promo.is_expired %}
+                            <div class="text-[11px] text-amber-500 mt-0.5">{{ promo.remaining_days }}k {{ promo.remaining_hours }}s qoldi</div>
+                            {% endif %}
+                        </td>
+                        <td class="p-4">
+                            {% if promo.status_badge == 'ACTIVE' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">Faol</span>
+                            {% elif promo.status_badge == 'EXPIRED' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">Tugagan</span>
+                            {% elif promo.status_badge == 'LIMIT_REACHED' %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">Limit to'lgan</span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">To'xtatilgan</span>
+                            {% endif %}
+                        </td>
+                        <td class="p-4 text-right space-x-2">
+                            <button onclick="togglePromo({{ promo.id }}, {{ 'false' if promo.is_active else 'true' }})" title="{{ 'To\'xtatish' if promo.is_active else 'Faollashtirish' }}" class="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs transition">
+                                <i class="fa-solid {{ 'fa-pause' if promo.is_active else 'fa-play' }}"></i>
+                            </button>
+                            <button onclick="deletePromo({{ promo.id }})" title="O'chirish" class="px-2.5 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 text-xs transition">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="p-8 text-center text-slate-400 text-sm">
+                            <i class="fa-solid fa-ticket text-3xl mb-2 opacity-40"></i>
+                            <p>Hozircha promokodlar yaratilmagan. Yuqoridagi tugma orqali yangi promokod yarating.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Create New Promocode -->
+<div id="promoModal" class="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl p-6">
+        <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+            <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                <i class="fa-solid fa-ticket text-amber-500"></i>
+                <span>Yangi Promokod Yaratish</span>
+            </h3>
+            <button onclick="closePromoModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+        </div>
+
+        <form id="createPromoForm" onsubmit="handleCreatePromo(event)" class="mt-5 space-y-4">
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Promokod Kodi</label>
+                <div class="flex space-x-2">
+                    <input type="text" id="p_code" required uppercase placeholder="Masalan: BAHOR2026" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white uppercase font-mono tracking-wider focus:outline-none focus:border-amber-500">
+                    <button type="button" onclick="generateRandomCode()" class="px-3 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition" title="Tasodifiy kod yaratish">
+                        <i class="fa-solid fa-shuffle"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Promokod Turi</label>
+                    <select id="p_type" onchange="updatePromoTypeUI()" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-amber-500">
+                        <option value="DAYS">Kunlik VIP Sovg'a (+Kunlar)</option>
+                        <option value="PERCENT">Foizli Chegirma (%)</option>
+                        <option value="FIXED">Aniq Summa Chegirmasi (so'm)</option>
+                    </select>
+                </div>
+                <div>
+                    <label id="p_val_label" class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Sovg'a Kunlar Soni</label>
+                    <input type="number" id="p_value" required min="1" value="7" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-amber-500">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Amal Qilish Muddati (kun)</label>
+                    <input type="number" id="p_duration" required min="1" max="365" value="14" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-amber-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Ishlatish Limiti (jami)</label>
+                    <input type="number" id="p_limit" required min="0" value="50" placeholder="0 = cheksiz" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-amber-500">
+                </div>
+            </div>
+
+            <div id="plansSelectorSection" class="hidden">
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Amal Qiladigan Tariflar</label>
+                <div class="flex items-center space-x-3 text-xs">
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" id="plan_all" checked onchange="togglePlanCheckboxes(this)" class="rounded text-amber-500 focus:ring-amber-500">
+                        <span class="text-slate-700 dark:text-slate-300 font-medium">Barchasi</span>
+                    </label>
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" value="1" class="sub-plan rounded text-amber-500 focus:ring-amber-500" disabled checked>
+                        <span class="text-slate-700 dark:text-slate-300">1 Oy</span>
+                    </label>
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" value="3" class="sub-plan rounded text-amber-500 focus:ring-amber-500" disabled checked>
+                        <span class="text-slate-700 dark:text-slate-300">3 Oy</span>
+                    </label>
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" value="6" class="sub-plan rounded text-amber-500 focus:ring-amber-500" disabled checked>
+                        <span class="text-slate-700 dark:text-slate-300">6 Oy</span>
+                    </label>
+                    <label class="flex items-center space-x-1.5 cursor-pointer">
+                        <input type="checkbox" value="12" class="sub-plan rounded text-amber-500 focus:ring-amber-500" disabled checked>
+                        <span class="text-slate-700 dark:text-slate-300">12 Oy</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end space-x-2">
+                <button type="button" onclick="closePromoModal()" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition">Bekor qilish</button>
+                <button type="submit" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-semibold shadow-sm transition">Yaratish</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openPromoModal() {
+    document.getElementById('promoModal').classList.remove('hidden');
+    document.getElementById('promoModal').classList.add('flex');
+}
+function closePromoModal() {
+    document.getElementById('promoModal').classList.add('hidden');
+    document.getElementById('promoModal').classList.remove('flex');
+}
+
+function generateRandomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let res = 'TAXI';
+    for(let i=0; i<4; i++) {
+        res += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    document.getElementById('p_code').value = res;
+}
+
+function updatePromoTypeUI() {
+    const type = document.getElementById('p_type').value;
+    const label = document.getElementById('p_val_label');
+    const plansSec = document.getElementById('plansSelectorSection');
+    
+    if (type === 'DAYS') {
+        label.innerText = "Sovg'a Kunlar Soni";
+        plansSec.classList.add('hidden');
+    } else if (type === 'PERCENT') {
+        label.innerText = "Chegirma Foizi (%)";
+        plansSec.classList.remove('hidden');
+    } else {
+        label.innerText = "Chegirma Summasi (so'm)";
+        plansSec.classList.remove('hidden');
+    }
+}
+
+function togglePlanCheckboxes(master) {
+    const subs = document.querySelectorAll('.sub-plan');
+    subs.forEach(cb => {
+        cb.disabled = master.checked;
+        if(master.checked) cb.checked = true;
+    });
+}
+
+async function handleCampaignSubmit(e) {
+    e.preventDefault();
+    const title = document.getElementById('camp_title').value.trim();
+    const duration = parseInt(document.getElementById('camp_duration').value);
+    const p1 = parseInt(document.getElementById('disc_1').value) || 0;
+    const p3 = parseInt(document.getElementById('disc_3').value) || 0;
+    const p6 = parseInt(document.getElementById('disc_6').value) || 0;
+    const p12 = parseInt(document.getElementById('disc_12').value) || 0;
+    
+    try {
+        const res = await fetch('/api/discounts/campaign', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                title: title,
+                duration_days: duration,
+                plan_discounts: { "1": p1, "3": p3, "6": p6, "12": p12 }
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            window.location.reload();
+        } else {
+            alert('Xatolik: ' + (data.error || 'Aksiyani saqlab bo\'lmadi'));
+        }
+    } catch(err) {
+        alert('Server bilan bog\'lanishda xatolik: ' + err.message);
+    }
+}
+
+async function stopCampaign() {
+    if(!confirm('Haqiqatdan ham joriy aksiyani to\'xtatmoqchimisiz?')) return;
+    try {
+        const res = await fetch('/api/discounts/campaign/stop', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) window.location.reload();
+    } catch(err) {
+        alert('Xatolik: ' + err.message);
+    }
+}
+
+async function handleCreatePromo(e) {
+    e.preventDefault();
+    const code = document.getElementById('p_code').value.trim();
+    const type = document.getElementById('p_type').value;
+    const val = parseFloat(document.getElementById('p_value').value);
+    const duration = parseInt(document.getElementById('p_duration').value);
+    const limit = parseInt(document.getElementById('p_limit').value);
+    
+    let applicable_plans = "ALL";
+    if (type !== 'DAYS') {
+        const isAll = document.getElementById('plan_all').checked;
+        if (!isAll) {
+            const selected = [];
+            document.querySelectorAll('.sub-plan:checked').forEach(cb => selected.push(cb.value));
+            if (selected.length === 0) {
+                alert('Kamida bitta tarifni tanlang!');
+                return;
+            }
+            applicable_plans = selected.join(',');
+        }
+    }
+    
+    try {
+        const res = await fetch('/api/promocodes', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                code: code,
+                discount_type: type,
+                discount_value: val,
+                duration_days: duration,
+                max_uses: limit,
+                applicable_plans: applicable_plans
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            window.location.reload();
+        } else {
+            alert('Xatolik: ' + (data.error || 'Promokod yaratib bo\'lmadi'));
+        }
+    } catch(err) {
+        alert('Xatolik: ' + err.message);
+    }
+}
+
+async function togglePromo(promoId, makeActive) {
+    try {
+        const res = await fetch(`/api/promocodes/${promoId}/toggle`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ is_active: makeActive })
+        });
+        const data = await res.json();
+        if (data.success) window.location.reload();
+    } catch(err) {
+        alert('Xatolik: ' + err.message);
+    }
+}
+
+async function deletePromo(promoId) {
+    if(!confirm('Haqiqatdan ham ushbu promokodni o\'chirmoqchimisiz?')) return;
+    try {
+        const res = await fetch(`/api/promocodes/${promoId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) window.location.reload();
+    } catch(err) {
+        alert('Xatolik: ' + err.message);
+    }
+}
+</script>
+{% endblock %}
