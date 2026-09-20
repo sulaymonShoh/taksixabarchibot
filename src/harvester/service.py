@@ -39,7 +39,7 @@ class HarvesterService:
         if not self.is_session_available():
             logger.warning(
                 f"Harvester session file '{self.session_path}.session' not found. "
-                "Harvester userbot is idle. Run 'python scripts/login_harvester.py' to activate."
+                "Harvester userbot is idle. Session not connected."
             )
             return False
 
@@ -115,7 +115,7 @@ class HarvesterService:
             except ValueError:
                 return {
                     "success": False,
-                    "error": "Userbot ulanmagan. Iltimos, oldin 'python scripts/login_harvester.py' orqali akkauntni ulang."
+                    "error": "Userbot ulanmagan. Iltimos, oldin Userbot akkauntini ulang."
                 }
 
         try:

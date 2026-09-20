@@ -42,6 +42,7 @@ class BotStates(StatesGroup):
 class AdminStates(StatesGroup):
     waiting_for_broadcast = State()
     waiting_for_group_target = State()
+    waiting_for_group_broadcast = State()
 
 # Pricing definition (months -> (amount_uzs, display_title, bonus_days))
 PRICING_PLANS = {
@@ -265,7 +266,7 @@ async def render_admin_dashboard(message_or_call, state: FSMContext = None):
     if is_online:
         userbot_badge = f"🟢 **FAOL** (`{u_info.get('username') or u_info.get('phone') or 'Ulangan'}`)"
     else:
-        userbot_badge = "🔴 **ULANMAGAN** (`python scripts/login_harvester.py` bosing)"
+        userbot_badge = "🔴 **ULANMAGAN** (Faol emas)"
 
     text = (
         "👑 **SuperAdmin Boshqaruv Paneli**\n"
@@ -1352,17 +1353,69 @@ async def admin_pending_cheques_call(call: CallbackQuery):
         await call.message.edit_text(text, reply_markup=kb.superadmin_kb(), parse_mode="Markdown")
     await safe_answer(call)
 
-@router.callback_query(F.data == "admin_broadcast_msg")
-async def admin_broadcast_call(call: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.in_(["admin_broadcast", "admin_broadcast_msg"]))
+async def admin_broadcast_menu_call(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
+        await safe_answer(call, "Ruxsat yo'q!", show_alert=True)
         return
+
+    from src.harvester.service import default_harvester_service
+    is_online = default_harvester_service.is_connected()
+    if not is_online:
+        await safe_answer(
+            call,
+            "⚠️ DIQQAT: Userbot ulanmagan!\n\n"
+            "Xabarnoma yuborish xizmatidan foydalanish uchun Userbot sessiyasi faol holatda bo'lishi lozim.",
+            show_alert=True
+        )
+        return
+
+    text = (
+        "📢 **Ommaviy Xabarnoma Yuborish**\n\n"
+        "Qaysi yo'nalishda e'lon yubormoqchisiz?\n"
+        "• **Bot foydalanuvchilariga**: Botdan ro'yxatdan o'tgan barcha haydovchilarga xabar.\n"
+        "• **Guruhlarga**: Harvester monitoring superguruhlariga Userbot orqali e'lon tarqatish.\n\n"
+        "📡 Userbot holati: 🟢 **FAOL**"
+    )
     with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text(
-            "📢 **Barcha foydalanuvchilarga xabar yuborish**\n\n"
-            "Yuboriladigan xabar matnini kiriting (Bekor qilish uchun /cancel deb yozing):",
-            reply_markup=kb.back_kb(),
+        await call.message.edit_text(text, reply_markup=kb.admin_broadcast_kb(userbot_online=True), parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.message(Command("broadcast"))
+async def admin_broadcast_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    from src.harvester.service import default_harvester_service
+    is_online = default_harvester_service.is_connected()
+    if not is_online:
+        await message.answer(
+            "⚠️ **DIQQAT: Userbot ulanmagan!**\n\n"
+            "Xabarnoma yuborish xizmatidan foydalanish uchun Userbot sessiyasi faol holatda bo'lishi lozim.",
+            reply_markup=kb.admin_return_kb(),
             parse_mode="Markdown"
         )
+        return
+
+    text = (
+        "📢 **Ommaviy Xabarnoma Yuborish**\n\n"
+        "Qaysi yo'nalishda e'lon yubormoqchisiz?\n"
+        "• **Bot foydalanuvchilariga**: Botdan ro'yxatdan o'tgan barcha haydovchilarga xabar.\n"
+        "• **Guruhlarga**: Harvester monitoring superguruhlariga Userbot orqali e'lon tarqatish.\n\n"
+        "📡 Userbot holati: 🟢 **FAOL**"
+    )
+    await message.answer(text, reply_markup=kb.admin_broadcast_kb(userbot_online=True), parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_broadcast_users")
+async def admin_broadcast_users_call(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    text = (
+        "👥 **Bot Foydalanuvchilariga Xabar Yuborish**\n\n"
+        "Barcha ro'yxatdan o'tgan foydalanuvchilarga yuboriladigan xabar matnini kiriting:\n"
+        "(Bekor qilish uchun: /cancel)"
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
     await state.set_state(AdminStates.waiting_for_broadcast)
     await safe_answer(call)
 
@@ -1372,7 +1425,7 @@ async def process_admin_broadcast(message: Message, state: FSMContext, bot: Bot)
         return
     if message.text == "/cancel":
         await state.clear()
-        await message.answer("Xabar tarqatish bekor qilindi.")
+        await message.answer("Xabar tarqatish bekor qilindi.", reply_markup=kb.admin_return_kb())
         return
         
     text = message.text
@@ -1389,7 +1442,70 @@ async def process_admin_broadcast(message: Message, state: FSMContext, bot: Bot)
         except Exception:
             pass
             
-    await status_msg.edit_text(f"✅ Xabar muvaffaqiyatli tarqatildi! ({sent}/{len(users)} ta yetkazildi)")
+    await status_msg.edit_text(
+        f"✅ **Xabar muvaffaqiyatli tarqatildi!**\n\n"
+        f"Yetkazildi: **{sent}/{len(users)} ta** foydalanuvchi.",
+        reply_markup=kb.admin_return_kb(),
+        parse_mode="Markdown"
+    )
+
+@router.callback_query(F.data == "admin_broadcast_groups")
+async def admin_broadcast_groups_call(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    from src.harvester.service import default_harvester_service
+    if not default_harvester_service.is_connected():
+        await safe_answer(
+            call,
+            "⚠️ DIQQAT: Userbot ulanmagan!\n\n"
+            "Guruhlarga e'lon tarqatish uchun Userbot ulangan bo'lishi kerak.",
+            show_alert=True
+        )
+        return
+    groups = await db.get_harvester_groups(active_only=True)
+    if not groups:
+        await safe_answer(call, "⚠️ Faol monitoring guruhlari mavjud emas.", show_alert=True)
+        return
+
+    text = (
+        f"📡 **Harvester Guruhlarga E'lon Tarqatish**\n\n"
+        f"Xabar {len(groups)} ta monitoring superguruhiga Userbot orqali yuboriladi.\n\n"
+        "Yuboriladigan e'lon matnini kiriting:\n"
+        "(Bekor qilish uchun: /cancel)"
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
+    await state.set_state(AdminStates.waiting_for_group_broadcast)
+    await safe_answer(call)
+
+@router.message(AdminStates.waiting_for_group_broadcast)
+async def process_admin_group_broadcast(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    if message.text == "/cancel":
+        await state.clear()
+        await message.answer("Guruhlarga e'lon tarqatish bekor qilindi.", reply_markup=kb.admin_return_kb())
+        return
+
+    text = message.text
+    await state.clear()
+    status_msg = await message.answer("⏳ Guruhlarga e'lon Userbot orqali tarqatilmoqda...")
+    from src.harvester.service import default_harvester_service
+    res = await default_harvester_service.broadcast_to_groups(text)
+    if res.get("success"):
+        await status_msg.edit_text(
+            f"✅ **Guruhlarga e'lon muvaffaqiyatli tarqatildi!**\n\n"
+            f"• Yetkazildi: **{res.get('sent', 0)} ta guruh**\n"
+            f"• Xatolik: {res.get('failed', 0)} ta",
+            reply_markup=kb.admin_return_kb(),
+            parse_mode="Markdown"
+        )
+    else:
+        await status_msg.edit_text(
+            f"❌ **Xatolik:** {res.get('error', 'E\'lon tarqatib bo\'lmadi')}",
+            reply_markup=kb.admin_return_kb(),
+            parse_mode="Markdown"
+        )
 
 @router.callback_query(F.data == "dismiss")
 async def dismiss_call(call: CallbackQuery):
@@ -1397,19 +1513,20 @@ async def dismiss_call(call: CallbackQuery):
         await call.message.delete()
     await safe_answer(call)
 
-@router.message(Command("finance"))
-@router.message(Command("earnings"))
-async def admin_finance_cmd(message: Message):
-    if message.from_user.id != ADMIN_ID:
+@router.callback_query(F.data == "admin_finance")
+async def admin_finance_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
         return
     stats = await db.get_earnings_stats()
+    pending = await db.get_pending_payment_requests()
     
     text = (
         "💰 **Taksi Xabarchi — Moliyaviy Hisobot**\n\n"
         f"💵 **Jami tushum:** `{stats['total_revenue']:,} so'm`\n"
         f"📅 **Shu oy:** `{stats['this_month']:,} so'm`\n"
         f"⏮ **O'tgan oy:** `{stats['last_month']:,} so'm`\n"
-        f"🧾 **Tasdiqlangan to'lovlar:** `{stats['approved_count']} ta`\n\n"
+        f"🧾 **Tasdiqlangan to'lovlar:** `{stats['approved_count']} ta`\n"
+        f"⏳ **Kutilayotgan cheklar:** `{len(pending)} ta`\n\n"
         "📊 **Oylik taqsimot:**\n"
     )
     if stats['monthly_breakdown']:
@@ -1419,7 +1536,68 @@ async def admin_finance_cmd(message: Message):
         text += "• Hozircha tasdiqlangan to'lovlar mavjud emas.\n"
         
     text += "\n🌐 Batafsil ma'lumot va cheklar tarixi veb-panelda: `/finance` sahifasida."
-    await message.answer(text, parse_mode="Markdown")
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.callback_query(F.data == "admin_users")
+async def admin_users_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    users = await db.get_all_users()
+    pending = await db.get_pending_payment_requests()
+    
+    active_vips = 0
+    trial_users = 0
+    now = datetime.utcnow()
+    for u in users:
+        exp = u.get('subscription_expiry')
+        if exp:
+            try:
+                if datetime.strptime(exp, '%Y-%m-%d %H:%M:%S') > now:
+                    active_vips += 1
+            except Exception:
+                pass
+        if u.get('is_trial'):
+            trial_users += 1
+
+    text = (
+        "👥 **Foydalanuvchilar Statistikasi**\n\n"
+        f"• 👥 **Jami ro'yxatdan o'tganlar:** `{len(users)} ta`\n"
+        f"• ⭐️ **Faol VIP obunachilar:** `{active_vips} ta`\n"
+        f"• 🎁 **Sinov muddatidagilar:** `{trial_users} ta`\n"
+        f"• 🧾 **Kutilayotgan to'lov cheklari:** `{len(pending)} ta`\n\n"
+        "🌐 Foydalanuvchilarni to'liq boshqarish va cheklarni tasdiqlash veb-panelda mavjud."
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.message(Command("finance"))
+@router.message(Command("earnings"))
+async def admin_finance_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    stats = await db.get_earnings_stats()
+    pending = await db.get_pending_payment_requests()
+    
+    text = (
+        "💰 **Taksi Xabarchi — Moliyaviy Hisobot**\n\n"
+        f"💵 **Jami tushum:** `{stats['total_revenue']:,} so'm`\n"
+        f"📅 **Shu oy:** `{stats['this_month']:,} so'm`\n"
+        f"⏮ **O'tgan oy:** `{stats['last_month']:,} so'm`\n"
+        f"🧾 **Tasdiqlangan to'lovlar:** `{stats['approved_count']} ta`\n"
+        f"⏳ **Kutilayotgan cheklar:** `{len(pending)} ta`\n\n"
+        "📊 **Oylik taqsimot:**\n"
+    )
+    if stats['monthly_breakdown']:
+        for m in stats['monthly_breakdown'][:6]:
+            text += f"• `{m['month']}`: {m['total_amount']:,} so'm ({m['count']} ta chek)\n"
+    else:
+        text += "• Hozircha tasdiqlangan to'lovlar mavjud emas.\n"
+        
+    text += "\n🌐 Batafsil ma'lumot va cheklar tarixi veb-panelda: `/finance` sahifasida."
+    await message.answer(text, reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
 
 # ==================== PROMOCODES & DISCOUNT CAMPAIGNS ====================
 @router.callback_query(F.data == "enter_promocode")
@@ -1511,7 +1689,7 @@ async def admin_discounts_cmd(message: Message):
         text += f"• `{p['code']}`: {val_str} ({p['used_count']}/{p['max_uses']} ta) — {p['status_badge']}\n"
         
     text += "\n🌐 Veb-paneldan boshqarish: `/discounts` sahifasida."
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text, reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
 
 @router.message(Command("setdiscount"))
 async def admin_setdiscount_cmd(message: Message):
@@ -1526,6 +1704,7 @@ async def admin_setdiscount_cmd(message: Message):
             "Masalan: `/setdiscount 3 20 Bahorgi aksiya`\n\n"
             "2. Har bir tarifga: `/setdiscount <KUN> <1m%> <3m%> <6m%> <12m%> [NOMI]`\n"
             "Masalan: `/setdiscount 3 0 12 15 20 Katta chegirma`",
+            reply_markup=kb.admin_return_kb(),
             parse_mode="Markdown"
         )
         return
@@ -1550,17 +1729,18 @@ async def admin_setdiscount_cmd(message: Message):
             f"🏷 Nomi: **{title}**\n"
             f"⏳ Muddat: **{duration_days} kun**\n"
             f"📊 Chegirmalar: `{plan_discounts}`",
+            reply_markup=kb.admin_return_kb(),
             parse_mode="Markdown"
         )
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {e}")
+        await message.answer(f"❌ Xatolik: {e}", reply_markup=kb.admin_return_kb())
 
 @router.message(Command("stopdiscount"))
 async def admin_stopdiscount_cmd(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     await db.stop_campaign_discount()
-    await message.answer("🛑 **Faol aksiya to'xtatildi.** Barcha tariflar standart holatga qaytarildi.")
+    await message.answer("🛑 **Faol aksiya to'xtatildi.** Barcha tariflar standart holatga qaytarildi.", reply_markup=kb.admin_return_kb())
 
 @router.message(Command("newpromo"))
 async def admin_newpromo_cmd(message: Message):
@@ -1573,6 +1753,7 @@ async def admin_newpromo_cmd(message: Message):
             "Misollar:\n"
             "• `/newpromo BAHOR days 7 14 50` (+7 kun bepul VIP, 14 kun, 50 marta)\n"
             "• `/newpromo TAXI20 percent 20 7 100 6,12` (20% chegirma, faqat 6 va 12 oylik tariflarga)",
+            reply_markup=kb.admin_return_kb(),
             parse_mode="Markdown"
         )
         return
@@ -1600,10 +1781,115 @@ async def admin_newpromo_cmd(message: Message):
             f"⏳ Muddat: **{dur_days} kun**\n"
             f"👥 Limit: **{max_uses} ta**\n"
             f"📦 Tariflar: `{plans}`",
+            reply_markup=kb.admin_return_kb(),
             parse_mode="Markdown"
         )
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {e}")
+        await message.answer(f"❌ Xatolik: {e}", reply_markup=kb.admin_return_kb())
+
+# ==================== SUPERADMIN PLANS & PRICING MANAGEMENT ====================
+async def render_admin_plans(message_or_call):
+    camp = await db.get_active_campaign_discount()
+    promos = await db.get_promocodes()
+    active_promos = [p for p in promos if p.get("status_badge") == "🟢 FAOL"]
+
+    text = (
+        "💳 **Tariflar va To'lov Sozlamalari**\n\n"
+        "📦 **Standart Tarif Rejalari:**\n"
+        "• 1 oylik obuna: **25,000 so'm** (30 kun)\n"
+        "• 3 oylik obuna: **65,000 so'm** (90 kun) — *Tejamkor*\n"
+        "• 6 oylik obuna: **120,000 so'm** (180 kun) — *Optima*\n"
+        "• 12 oylik obuna: **225,000 so'm** (390 kun) — *+1 oy bepul 🔥*\n\n"
+    )
+    if camp:
+        d = camp.get("plan_discounts", {})
+        rem_days = camp.get("remaining_days", 0)
+        rem_hours = camp.get("remaining_hours", 0)
+        text += (
+            f"🔥 **Faol Aksiya:** `{camp.get('title', 'Aksiya')}`\n"
+            f"• Chegirmalar: 1m: **{d.get('1', 0)}%** | 3m: **{d.get('3', 0)}%** | 6m: **{d.get('6', 0)}%** | 12m: **{d.get('12', 0)}%**\n"
+            f"• Qolgan vaqt: `{rem_days} kun, {rem_hours} soat`\n\n"
+        )
+    else:
+        text += "⚪️ **Faol Aksiya:** Hozirda umumiy aksiya yo'q.\n\n"
+
+    text += (
+        f"🎟 **Promokodlar:** Jami {len(promos)} ta ({len(active_promos)} ta faol)\n\n"
+        "⚡️ **Boshqaruv buyruqlari:**\n"
+        "• `/setdiscount <kun> <% yoki 1m 3m 6m 12m> [nomi]` — Chegirma aksiyasini yoqish\n"
+        "• `/stopdiscount` — Faol aksiyani to'xtatish\n"
+        "• `/newpromo` — Yangi promo-kod yaratish\n"
+        "• `/discounts` — Barcha chegirma va promolarni ko'rish"
+    )
+
+    markup = kb.admin_plans_kb(has_active_discount=bool(camp))
+    if isinstance(message_or_call, Message):
+        await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        with contextlib.suppress(TelegramBadRequest):
+            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_plans")
+async def admin_plans_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await render_admin_plans(call)
+    await safe_answer(call)
+
+@router.message(Command("plans"))
+async def admin_plans_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await render_admin_plans(message)
+
+@router.callback_query(F.data == "admin_promos")
+async def admin_promos_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await render_admin_plans(call)
+    await safe_answer(call)
+
+@router.callback_query(F.data == "admin_stop_discount")
+async def admin_stop_discount_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await db.stop_campaign_discount()
+    await safe_answer(call, "🛑 Aksiya to'xtatildi!", show_alert=True)
+    await render_admin_plans(call)
+
+@router.callback_query(F.data == "admin_set_discount_info")
+async def admin_set_discount_info_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    text = (
+        "🏷 **Yangi Chegirma Aksiyasi Belgilash**\n\n"
+        "Aksiya boshlash uchun quyidagi buyruq formatlaridan birini yozib yuboring:\n\n"
+        "1. **Barcha tariflarga bir xil chegirma:**\n"
+        "`/setdiscount <KUN> <FOIZ%> [NOMI]`\n"
+        "Masalan: `/setdiscount 3 20 Bahorgi aksiya`\n\n"
+        "2. **Har bir tarifga alohida chegirma:**\n"
+        "`/setdiscount <KUN> <1m%> <3m%> <6m%> <12m%> [NOMI]`\n"
+        "Masalan: `/setdiscount 3 0 10 15 20 Katta aksiya`"
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.callback_query(F.data == "admin_new_promo_info")
+async def admin_new_promo_info_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    text = (
+        "🎟 **Yangi Promokod Yaratish**\n\n"
+        "Yangi promo-kod yaratish uchun quyidagi buyruqdan foydalaning:\n"
+        "`/newpromo <KOD> <days|percent> <QIYMAT> <KUN> <LIMIT> [TARIFLAR]`\n\n"
+        "**Misollar:**\n"
+        "• `/newpromo BAHOR days 7 14 50` (+7 kun bepul VIP, 14 kunlik amal qilish, 50 marta)\n"
+        "• `/newpromo TAXI20 percent 20 7 100 6,12` (20% chegirma, faqat 6 va 12 oylik tariflarga)"
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
+    await safe_answer(call)
 
 # ==================== V3 DRIVER RADAR HANDLERS (STAGE 3) ====================
 
@@ -1822,7 +2108,7 @@ async def render_admin_harvester_hub(message_or_call):
         u_name = u_info.get("username") or u_info.get("phone") or "Ulangan"
         status_line = f"🟢 **FAOL** (`{u_name}`, ID: `{u_info.get('id')}`)"
     else:
-        status_line = "🔴 **ULANMAGAN**\n*(Userbotni ulash uchun terminalda `python scripts/login_harvester.py` bosing)*"
+        status_line = "🔴 **ULANMAGAN**\n*(Userbot sessiyasi ulanmagan)*"
 
     text = (
         "📡 **Harvester Radar — Boshqaruv Markazi**\n\n"
@@ -1889,7 +2175,7 @@ async def admin_groups_cmd(message: Message):
         return
     groups = await db.get_harvester_groups(active_only=False)
     if not groups:
-        await message.answer("📋 **Monitoring Guruhlari:**\nHozircha birorta ham guruh yo'q.\nQo'shish: `/add_group @username`", parse_mode="Markdown")
+        await message.answer("📋 **Monitoring Guruhlari:**\nHozircha birorta ham guruh yo'q.\nQo'shish: `/add_group @username`", reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
         return
     text = f"📋 **Monitoring Guruhlari ({len(groups)} ta):**\nBoshqarish uchun tugmalardan foydalaning:"
     markup = kb.admin_groups_list_kb(groups, page=0)
@@ -2011,6 +2297,7 @@ async def admin_add_group_cmd(message: Message):
         await message.answer(
             "⚠️ **Format:** `/add_group <@username | havola | ID>`\n"
             "Misol: `/add_group @vodiy_pitak_taxi`",
+            reply_markup=kb.admin_return_kb(),
             parse_mode="Markdown"
         )
         return
@@ -2024,10 +2311,11 @@ async def admin_add_group_cmd(message: Message):
     if res.get("success"):
         await message.answer(
             f"✅ **Guruh qo'shildi:** `{res.get('title')}` (ID: `{res.get('group_id')}`)",
+            reply_markup=kb.admin_return_kb(),
             parse_mode="Markdown"
         )
     else:
-        await message.answer(f"❌ **Xatolik:** {res.get('error')}", parse_mode="Markdown")
+        await message.answer(f"❌ **Xatolik:** {res.get('error')}", reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
 
 @router.message(Command("del_group"))
 async def admin_del_group_cmd(message: Message):
@@ -2035,13 +2323,13 @@ async def admin_del_group_cmd(message: Message):
         return
     parts = message.text.strip().split()
     if len(parts) < 2 or not parts[1].lstrip("-").isdigit():
-        await message.answer("⚠️ **Format:** `/del_group <guruh_id>`", parse_mode="Markdown")
+        await message.answer("⚠️ **Format:** `/del_group <guruh_id>`", reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
         return
     gid = int(parts[1])
     await db.delete_harvester_group(gid)
     from src.harvester.service import default_harvester_service
     await default_harvester_service.reload_groups()
-    await message.answer(f"✅ Guruh (ID: `{gid}`) monitoringdan o'chirildi.", parse_mode="Markdown")
+    await message.answer(f"✅ Guruh (ID: `{gid}`) monitoringdan o'chirildi.", reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
 
 @router.callback_query(F.data == "admin_recent_orders")
 async def admin_recent_orders_call(call: CallbackQuery):

@@ -303,7 +303,10 @@ def admin_main_dashboard_kb(userbot_online: bool = False, pending_cheques: int =
             InlineKeyboardButton(text=f"💰 Moliya & Cheklar{cheque_badge}", callback_data="admin_finance")
         ],
         [
-            InlineKeyboardButton(text="🏷 Chegirma & Promolar", callback_data="admin_promos"),
+            InlineKeyboardButton(text="💳 Tariflarni boshqarish", callback_data="admin_plans"),
+            InlineKeyboardButton(text="🏷 Chegirma & Promolar", callback_data="admin_promos")
+        ],
+        [
             InlineKeyboardButton(text="📢 Xabarnoma yuborish", callback_data="admin_broadcast")
         ],
         [
@@ -323,9 +326,35 @@ def admin_harvester_hub_kb(userbot_online: bool = False) -> InlineKeyboardMarkup
             InlineKeyboardButton(text="🔄 Guruhlarni qayta yuklash", callback_data="admin_reload_groups"),
             InlineKeyboardButton(text="📥 Oxirgi buyurtmalar", callback_data="admin_recent_orders")
         ],
-        [InlineKeyboardButton(text="« Asosiy panelga qaytish", callback_data="admin_panel")]
+        [InlineKeyboardButton(text="👑 Asosiy panelga qaytish", callback_data="admin_panel")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def admin_plans_kb(has_active_discount: bool = False) -> InlineKeyboardMarkup:
+    """Keyboard for managing pricing plans and payment info."""
+    buttons = [
+        [
+            InlineKeyboardButton(text="🏷 Chegirma aksiyasi (/setdiscount)", callback_data="admin_set_discount_info"),
+            InlineKeyboardButton(text="🎟 Yangi promo (/newpromo)", callback_data="admin_new_promo_info")
+        ]
+    ]
+    if has_active_discount:
+        buttons.append([
+            InlineKeyboardButton(text="🛑 Faol aksiyani to'xtatish", callback_data="admin_stop_discount")
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="👑 Asosiy panelga qaytish", callback_data="admin_panel")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def admin_broadcast_kb(userbot_online: bool = False) -> InlineKeyboardMarkup:
+    """Keyboard for broadcasting options."""
+    hb_icon = "🟢" if userbot_online else "🔴"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Bot foydalanuvchilariga xabar", callback_data="admin_broadcast_users")],
+        [InlineKeyboardButton(text=f"📡 Guruhlarga e'lon ({hb_icon} Userbot)", callback_data="admin_broadcast_groups")],
+        [InlineKeyboardButton(text="👑 Asosiy panelga qaytish", callback_data="admin_panel")]
+    ])
 
 def admin_groups_list_kb(groups: List[Dict[str, Any]], page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
     """Paginated inline keyboard displaying monitored groups with toggle/delete."""
@@ -372,7 +401,7 @@ def admin_groups_list_kb(groups: List[Dict[str, Any]], page: int = 0, per_page: 
 
 def admin_return_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="« Asosiy panelga qaytish", callback_data="admin_panel")]
+        [InlineKeyboardButton(text="👑 Asosiy panelga qaytish", callback_data="admin_panel")]
     ])
 
 
