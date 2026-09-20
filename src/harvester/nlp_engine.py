@@ -44,17 +44,22 @@ class OrderParser:
             return ""
         # 1. Transliterate
         t = transliterate_cyrillic_to_latin(text)
-        # 2. Normalize apostrophes and quotes
+        # 2. Collapse single-character spaced sequences (e.g. "p o ch t a   o l a m i z" -> "pochta   olamiz")
+        prev = None
+        while prev != t:
+            prev = t
+            t = re.sub(r'(?<=\b\w) (?=\w\b)', '', t)
+        # 3. Normalize apostrophes and quotes
         t = t.replace("‘", "'").replace("’", "'").replace("`", "'").replace("ʻ", "'")
-        # 3. Clean excessive whitespace
+        # 4. Clean excessive whitespace
         return " ".join(t.split())
 
     def is_driver_ad(self, norm_text: str) -> bool:
         """Returns True if the message is an advertisement from a driver, spammer, or loan broker."""
         lower = norm_text.lower()
 
-        # Passenger inquiry exception: e.g. "joy bormi", "bitta joy bormi", "mashina bormi"
-        if re.search(r"\b(joy|mashina|moshina|taksi)\s*(bormi|bormikin|topiladimi)\b", lower):
+        # Passenger inquiry exception: e.g. "joy bormi", "bitta joy bormi", "mashina bormi", "mashina kerak"
+        if re.search(r"\b(joy|mashina|moshina|taksi)\s*(bormi|bormikin|topiladimi|kerak|kere)\b", lower):
             return False
 
         # 1. Check exact blacklisted driver phrases with word boundaries
