@@ -1688,4 +1688,28 @@ async def radar_districts_clear_call(call: CallbackQuery):
     await render_radar_districts(call, user_id)
     await safe_answer(call, "⬜️ Tumanlar filtri tozalandi")
 
+# ==================== V3 ORDER CLAIM HANDLER (STAGE 4) ====================
+
+@router.callback_query(F.data.startswith("claim_order_"))
+async def claim_order_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    order_id = call.data.replace("claim_order_", "")
+    user = await db.get_user(user_id)
+    _, is_vip = check_subscription(user.get("subscription_expiry") if user else None)
+    if not is_vip:
+        await safe_answer(call, "⚠️ Buyurtmani qabul qilish uchun VIP obuna kerak!", show_alert=True)
+        return
+
+    await safe_answer(call, "✅ Buyurtma qabul qilindi! Mijoz bilan zudlik bilan bog'laning.", show_alert=True)
+    with contextlib.suppress(TelegramBadRequest):
+        current_text = call.message.html_text or call.message.text or ""
+        claimed_banner = "\n\n<b>✅ SIZ BU BUYURTMANI QABUL QILDINGIZ!</b>\n<i>Mijoz bilan bog'laning.</i>"
+        if "SIZ BU BUYURTMANI QABUL QILDINGIZ" not in current_text:
+            new_text = current_text + claimed_banner
+            new_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Qabul qilingan", callback_data="noop")]
+            ])
+            await call.message.edit_text(new_text, reply_markup=new_kb, parse_mode="HTML")
+
+
 

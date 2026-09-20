@@ -23,6 +23,10 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     
+    # Wire Bot to Harvester Dispatcher Grid (Stage 4)
+    from src.harvester.dispatcher import default_dispatcher
+    default_dispatcher.bot = bot
+    
     # Apply user auto-registration & access middleware
     dp.update.middleware(UserRegistrationMiddleware())
     dp.include_router(router)

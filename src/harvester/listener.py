@@ -29,7 +29,11 @@ class HarvesterListener:
         self.client = client
         self.parser = parser or OrderParser()
         self.dedup = deduplicator or default_deduplicator
-        self.on_order_callback = on_order_callback
+        if on_order_callback is not None:
+            self.on_order_callback = on_order_callback
+        else:
+            from src.harvester.dispatcher import default_dispatcher
+            self.on_order_callback = default_dispatcher.dispatch_order
         self._is_running = False
         self._monitored_chat_ids: List[int] = []
 
