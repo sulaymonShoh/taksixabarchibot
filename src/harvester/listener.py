@@ -88,10 +88,12 @@ class HarvesterListener:
             return None
 
         order["id"] = order_id
+        orig_name = (order.get("origin") or {}).get("name", "?")
+        dest_name = (order.get("destination") or order.get("dest") or {}).get("name", "?")
         logger.info(
             f"New Order #{order_id} captured from '{chat_title}': "
-            f"[{order['order_type']}] {order.get('origin', {}).get('name', '?')} -> "
-            f"{order.get('destination', {}).get('name', '?')} ({phone or 'No phone'})"
+            f"[{order['order_type']}] {orig_name} -> "
+            f"{dest_name} ({phone or 'No phone'})"
         )
 
         # 4. Trigger dispatch callback for active drivers (Stage 3 & 4)

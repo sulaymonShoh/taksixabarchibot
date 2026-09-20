@@ -8,9 +8,27 @@ from typing import Dict, Any, Optional, List, Set
 from src.harvester.nlp_rules import transliterate_cyrillic_to_latin
 
 REGIONS: Dict[str, Dict[str, Any]] = {
-    "toshkent_shahar": {"id": "toshkent_shahar", "name": "Toshkent shahri", "code": "TAS", "type": "city"},
-    "toshkent_viloyati": {"id": "toshkent_viloyati", "name": "Toshkent viloyati", "code": "TV", "type": "region"},
-    "andijon": {"id": "andijon", "name": "Andijon viloyati", "code": "AND", "type": "region"},
+    "toshkent_shahar": {
+        "id": "toshkent_shahar", "name": "Toshkent shahri", "code": "TAS", "type": "city",
+        "aliases": [
+            "toshkent", "toshkenga", "toshkenta", "toshkendan", "toshken", "toshkend",
+            "tashkent", "tashkenga", "tashkentga", "tashkentdan", "toshkentdan", "toshkentga",
+            "тошкент", "тошкен", "тошкенд", "ташкент", "ташкен", "toshkent shahar",
+            "тошкентга", "тошкенга", "тошкентдан", "тошкендан"
+        ]
+    },
+    "toshkent_viloyati": {
+        "id": "toshkent_viloyati", "name": "Toshkent viloyati", "code": "TV", "type": "region",
+        "aliases": ["toshkent viloyati", "tosh vil", "тош вил", "тошкент вилояти"]
+    },
+    "andijon": {
+        "id": "andijon", "name": "Andijon viloyati", "code": "AND", "type": "region",
+        "aliases": [
+            "andijon", "andijonga", "andijondan", "anjan", "anjanga", "anjandan",
+            "anjon", "anjonga", "anjondan", "андижон", "андижонга", "андижондан",
+            "анжан", "анжанга", "анжандан", "анжон", "анжонга", "анжондан", "andijon viloyati"
+        ]
+    },
     "fargona": {"id": "fargona", "name": "Farg'ona viloyati", "code": "FAR", "type": "region"},
     "namangan": {"id": "namangan", "name": "Namangan viloyati", "code": "NAM", "type": "region"},
     "samarqand": {"id": "samarqand", "name": "Samarqand viloyati", "code": "SAM", "type": "region"},
@@ -105,7 +123,11 @@ DISTRICTS: Dict[str, Dict[str, Any]] = {
         "id": "andijon_shahar",
         "name": "Andijon shahar",
         "region_id": "andijon",
-        "aliases": ["andijon", "andijonga", "андижон", "андижан", "андижонга", "andijon shahar", "andijon shaxar", "eski shahar andijon", "yangi bozor andijon"],
+        "aliases": [
+            "andijon", "andijonga", "andijondan", "андижон", "андижан", "андижонга", "андижондан",
+            "anjan", "anjanga", "anjandan", "anjon", "anjonga", "anjondan", "анжан", "анжанга", "анжандан", "анжон", "анжонга", "анжондан",
+            "andijon shahar", "andijon shaxar", "eski shahar andijon", "yangi bozor andijon"
+        ],
         "corridor_neighbors": ["asaka", "shahrixon", "oltinkol", "xojaobod", "buloqboshi", "jalaquduq", "paxtaobod"]
     },
     "oltinkol": {
@@ -488,17 +510,24 @@ def _build_geo_index():
     global _ALIAS_TO_ENTITY, _ALL_SORTED_ALIASES
     _ALIAS_TO_ENTITY.clear()
 
-    # 1. Index pitaks
-    for p_id, p_data in PITAKS.items():
+    # 1. Index regions (Broadest / lowest precedence)
+    for r_id, r_data in REGIONS.items():
         entity_info = {
-            "entity_type": "PITAK",
-            "id": p_id,
-            "name": p_data["name"],
-            "region_id": p_data["region_id"],
-            "serves_directions": p_data.get("serves_directions", []),
-            "district_id": None
+            "entity_type": "REGION",
+            "id": r_id,
+            "name": r_data["name"],
+            "region_id": r_id,
+            "district_id": None,
+            "corridor_neighbors": []
         }
-        for alias in p_data.get("aliases", []):
+        reg_clean = _normalize_alias(r_data["name"])
+        _ALIAS_TO_ENTITY[reg_clean] = entity_info
+        _ALIAS_TO_ENTITY[r_id] = entity_info
+        trans_clean = _normalize_alias(transliterate_cyrillic_to_latin(reg_clean))
+        if trans_clean:
+            _ALIAS_TO_ENTITY[trans_clean] = entity_info
+
+        for alias in r_data.get("aliases", []):
             clean = _normalize_alias(alias)
             if clean:
                 _ALIAS_TO_ENTITY[clean] = entity_info
@@ -506,7 +535,7 @@ def _build_geo_index():
                 if trans_clean:
                     _ALIAS_TO_ENTITY[trans_clean] = entity_info
 
-    # 2. Index districts
+    # 2. Index districts (More specific, overrides general region aliases)
     for d_id, d_data in DISTRICTS.items():
         entity_info = {
             "entity_type": "DISTRICT",
@@ -524,22 +553,23 @@ def _build_geo_index():
                 if trans_clean:
                     _ALIAS_TO_ENTITY[trans_clean] = entity_info
 
-    # 3. Index regions
-    for r_id, r_data in REGIONS.items():
+    # 3. Index pitaks (Most specific departure hubs, highest precedence)
+    for p_id, p_data in PITAKS.items():
         entity_info = {
-            "entity_type": "REGION",
-            "id": r_id,
-            "name": r_data["name"],
-            "region_id": r_id,
-            "district_id": None,
-            "corridor_neighbors": []
+            "entity_type": "PITAK",
+            "id": p_id,
+            "name": p_data["name"],
+            "region_id": p_data["region_id"],
+            "serves_directions": p_data.get("serves_directions", []),
+            "district_id": None
         }
-        reg_clean = _normalize_alias(r_data["name"])
-        _ALIAS_TO_ENTITY[reg_clean] = entity_info
-        _ALIAS_TO_ENTITY[r_id] = entity_info
-        trans_clean = _normalize_alias(transliterate_cyrillic_to_latin(reg_clean))
-        if trans_clean:
-            _ALIAS_TO_ENTITY[trans_clean] = entity_info
+        for alias in p_data.get("aliases", []):
+            clean = _normalize_alias(alias)
+            if clean:
+                _ALIAS_TO_ENTITY[clean] = entity_info
+                trans_clean = _normalize_alias(transliterate_cyrillic_to_latin(clean))
+                if trans_clean:
+                    _ALIAS_TO_ENTITY[trans_clean] = entity_info
 
     # Sort aliases longest first for greedy string matching
     _ALL_SORTED_ALIASES = sorted(_ALIAS_TO_ENTITY.keys(), key=lambda x: len(x), reverse=True)

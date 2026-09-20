@@ -138,18 +138,22 @@ class OrderParser:
         destination: Optional[Dict[str, Any]] = None
         lower = norm_text.lower()
 
-        # Step 1: Scan for explicit "dan" (origin) and "ga/qa/ka" (destination) suffix words
+        # Step 1: Scan for explicit "dan/tan" (origin) and "ga/qa/ka" (destination) suffix words
         words = re.findall(r"\b[a-zA-Z'\-]+\b", lower)
         for w in words:
-            if w.endswith("dan") and len(w) > 4 and not origin:
-                stem = w[:-3]
+            if (w.endswith("dan") or w.endswith("tan")) and len(w) > 4 and not origin:
+                stem = re.sub(r"(dan|tan)$", "", w)
                 loc = resolve_location(stem)
+                if not loc and stem.endswith("d"):
+                    loc = resolve_location(stem[:-1] + "t") or resolve_location(stem[:-1])
                 if loc:
                     origin = loc
 
             elif (w.endswith("ga") or w.endswith("qa") or w.endswith("ka")) and len(w) > 3 and not destination:
                 stem = re.sub(r"(ga|qa|ka)$", "", w)
                 loc = resolve_location(stem)
+                if not loc and stem.endswith("d"):
+                    loc = resolve_location(stem[:-1] + "t") or resolve_location(stem[:-1])
                 if loc:
                     destination = loc
 

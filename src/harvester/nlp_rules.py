@@ -109,16 +109,17 @@ CARGO_ORDER_REGEXES: List[Pattern] = [
 
 # ==================== PASSENGER COUNT EXTRACTION ====================
 COUNT_WORDS: Dict[str, int] = {
-    "bitta": 1, "bita": 1, "1ta": 1, "1 ta": 1, "1": 1, "bir": 1,
-    "ikkita": 2, "ikita": 2, "2ta": 2, "2 ta": 2, "2": 2, "ikki": 2,
-    "uchta": 3, "3ta": 3, "3 ta": 3, "3": 3, "uch": 3,
-    "torta": 4, "to'rtta": 4, "4ta": 4, "4 ta": 4, "4": 4, "to'rt": 4, "tort": 4,
-    "beshta": 5, "5ta": 5, "5 ta": 5, "5": 5, "besh": 5,
+    "bitta": 1, "bita": 1, "1ta": 1, "1 ta": 1, "1": 1, "bir": 1, "битта": 1, "бита": 1, "бир": 1,
+    "ikkita": 2, "ikita": 2, "2ta": 2, "2 ta": 2, "2": 2, "ikki": 2, "ekki": 2, "ekkita": 2,
+    "икки": 2, "иккита": 2, "екки": 2, "еккита": 2,
+    "uchta": 3, "3ta": 3, "3 ta": 3, "3": 3, "uch": 3, "уч": 3, "учта": 3,
+    "torta": 4, "to'rtta": 4, "4ta": 4, "4 ta": 4, "4": 4, "to'rt": 4, "tort": 4, "турт": 4, "туртта": 4, "торт": 4, "тортта": 4,
+    "beshta": 5, "5ta": 5, "5 ta": 5, "5": 5, "besh": 5, "беш": 5, "бешта": 5,
     "salon": 4, "butun salon": 4
 }
 
 COUNT_REGEX = re.compile(
-    r"\b([1-6]|bitta|bita|ikkita|ikita|uchta|to'rtta|torta|beshta)\s*(?:ta\s*)?(?:kishi|odam|kishilik|joy)",
+    r"\b([1-6]|bitta|bita|ikkita|ikita|ekki|ekkita|ikki|uchta|uch|to'rtta|torta|tort|to'rt|beshta|besh|битта|бита|икки|иккита|екки|еккита|уч|учта|турт|туртта|торт|беш|бешта)\s*(?:ta\s*)?(?:kishi|odam|kishilik|joy)",
     re.IGNORECASE
 )
 
