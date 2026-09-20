@@ -28,6 +28,7 @@ DB_PATH = os.getenv("DB_PATH", "data/broadcast.db")
 SESSIONS_DIR = "sessions"
 MEDIA_DIR = "media"
 LOG_DIR = "logs"
+HARVESTER_SESSION_NAME = os.getenv("HARVESTER_SESSION_NAME", "harvester")
 
 # Ensure directories exist
 os.makedirs(SESSIONS_DIR, exist_ok=True)

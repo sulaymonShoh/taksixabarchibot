@@ -41,6 +41,7 @@ class BotStates(StatesGroup):
 
 class AdminStates(StatesGroup):
     waiting_for_broadcast = State()
+    waiting_for_group_target = State()
 
 # Pricing definition (months -> (amount_uzs, display_title, bonus_days))
 PRICING_PLANS = {
@@ -215,7 +216,73 @@ async def render_dashboard(message_or_call, user_id: int, state: FSMContext = No
         )
         
     markup = kb.main_dashboard_kb(is_authenticated=is_auth, is_running=is_running, drop_author=drop_author)
+    if user_id == ADMIN_ID:
+        markup.inline_keyboard.insert(0, [
+            InlineKeyboardButton(text="👑 SuperAdmin Panelga qaytish", callback_data="admin_panel")
+        ])
     
+    if isinstance(message_or_call, Message):
+        await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        with contextlib.suppress(TelegramBadRequest):
+            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+
+async def render_admin_dashboard(message_or_call, state: FSMContext = None):
+    if state:
+        await state.clear()
+        
+    user_id = message_or_call.from_user.id
+    full_name = getattr(message_or_call.from_user, 'full_name', 'SuperAdmin')
+
+    all_users = await db.get_all_users()
+    total_users = len(all_users)
+    now = datetime.utcnow()
+    active_vips = 0
+    for u in all_users:
+        exp = u.get("subscription_expiry")
+        if exp:
+            try:
+                if datetime.strptime(exp, '%Y-%m-%d %H:%M:%S') > now:
+                    active_vips += 1
+            except Exception:
+                pass
+
+    earnings = await db.get_earnings_stats()
+    total_rev = earnings.get("total_revenue", 0)
+    pending_cheques = await db.get_pending_payment_requests()
+    pending_count = len(pending_cheques)
+
+    h_stats = await db.get_harvester_stats()
+    total_groups = h_stats.get("total_groups", 0)
+    active_groups = h_stats.get("active_groups", 0)
+    today_orders = h_stats.get("today_orders", 0)
+
+    from src.harvester.service import default_harvester_service
+    hb_status = default_harvester_service.get_status()
+    is_online = hb_status["is_connected"]
+    u_info = hb_status.get("user_info", {})
+    
+    if is_online:
+        userbot_badge = f"🟢 **FAOL** (`{u_info.get('username') or u_info.get('phone') or 'Ulangan'}`)"
+    else:
+        userbot_badge = "🔴 **ULANMAGAN** (`python scripts/login_harvester.py` bosing)"
+
+    text = (
+        "👑 **SuperAdmin Boshqaruv Paneli**\n"
+        f"Assalomu alaykum, **{full_name}**!\n\n"
+        "📊 **Tizim Umumiy Ko'rsatkichlari:**\n"
+        f"• 👥 Foydalanuvchilar: **{total_users} ta** ({active_vips} ta faol VIP)\n"
+        f"• 💰 Jami tushum: **{total_rev:,} so'm**\n"
+        f"• ⏳ Kutilayotgan cheklar: **{pending_count} ta**\n\n"
+        "📡 **Harvester Radar Tizimi:**\n"
+        f"• Userbot holati: {userbot_badge}\n"
+        f"• Monitoring guruhlari: **{active_groups} ta faol** / {total_groups} ta jami\n"
+        f"• Bugungi toza buyurtmalar: **{today_orders} ta**\n\n"
+        "Kerakli bo'limni tanlang:"
+    )
+
+    markup = kb.admin_main_dashboard_kb(userbot_online=is_online, pending_cheques=pending_count)
+
     if isinstance(message_or_call, Message):
         await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
     else:
@@ -225,8 +292,13 @@ async def render_dashboard(message_or_call, user_id: int, state: FSMContext = No
 # ==================== START & MENU HANDLERS ====================
 @router.message(CommandStart())
 @router.message(Command("menu"))
+@router.message(Command("admin"))
 async def start_cmd(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    if user_id == ADMIN_ID:
+        await render_admin_dashboard(message, state)
+        return
+
     user, is_new = await db.get_or_create_user(
         user_id=user_id,
         full_name=message.from_user.full_name or "Foydalanuvchi",
@@ -243,9 +315,27 @@ async def start_cmd(message: Message, state: FSMContext):
         
     await render_dashboard(message, user_id, state)
 
+@router.callback_query(F.data == "admin_panel")
+async def admin_panel_call(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        await safe_answer(call, "Ruxsat yo'q!", show_alert=True)
+        return
+    await render_admin_dashboard(call, state)
+    await safe_answer(call)
+
+@router.callback_query(F.data == "admin_driver_view")
+async def admin_driver_view_call(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await render_dashboard(call, call.from_user.id, state)
+    await safe_answer(call)
+
 @router.callback_query(F.data == "back_dashboard")
 async def back_dashboard_call(call: CallbackQuery, state: FSMContext):
-    await render_dashboard(call, call.from_user.id, state)
+    if call.from_user.id == ADMIN_ID:
+        await render_admin_dashboard(call, state)
+    else:
+        await render_dashboard(call, call.from_user.id, state)
     await safe_answer(call)
 
 @router.callback_query(F.data == "help_info")
@@ -1710,6 +1800,356 @@ async def claim_order_call(call: CallbackQuery):
                 [InlineKeyboardButton(text="✅ Qabul qilingan", callback_data="noop")]
             ])
             await call.message.edit_text(new_text, reply_markup=new_kb, parse_mode="HTML")
+
+
+# ==================== SUPERADMIN HARVESTER & PANEL HANDLERS ====================
+
+async def render_admin_harvester_hub(message_or_call):
+    from src.harvester.service import default_harvester_service
+    hb_status = default_harvester_service.get_status()
+    is_online = hb_status["is_connected"]
+    u_info = hb_status.get("user_info", {})
+    
+    h_stats = await db.get_harvester_stats()
+    total_groups = h_stats.get("total_groups", 0)
+    active_groups = h_stats.get("active_groups", 0)
+    total_orders = h_stats.get("total_orders", 0)
+    today_orders = h_stats.get("today_orders", 0)
+    passenger_orders = h_stats.get("passenger_orders", 0)
+    cargo_orders = h_stats.get("cargo_orders", 0)
+
+    if is_online:
+        u_name = u_info.get("username") or u_info.get("phone") or "Ulangan"
+        status_line = f"🟢 **FAOL** (`{u_name}`, ID: `{u_info.get('id')}`)"
+    else:
+        status_line = "🔴 **ULANMAGAN**\n*(Userbotni ulash uchun terminalda `python scripts/login_harvester.py` bosing)*"
+
+    text = (
+        "📡 **Harvester Radar — Boshqaruv Markazi**\n\n"
+        f"🤖 **Userbot Tinglovchi Holati:**\n{status_line}\n\n"
+        "📊 **Monitoring Ko'rsatkichlari:**\n"
+        f"• 👥 Faol guruhlar: **{active_groups} ta** / {total_groups} ta jami\n"
+        f"• ⚡️ Bugungi buyurtmalar: **{today_orders} ta**\n"
+        f"• 📦 Jami buyurtmalar: **{total_orders} ta** ({passenger_orders} odam / {cargo_orders} pochta)\n"
+        f"• ⚡️ NLP tahlil tezligi: **< 0.05 ms** (sub-millisekund)\n\n"
+        "Quyidagi amallardan birini tanlang:"
+    )
+
+    markup = kb.admin_harvester_hub_kb(userbot_online=is_online)
+
+    if isinstance(message_or_call, Message):
+        await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        with contextlib.suppress(TelegramBadRequest):
+            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_harvester")
+async def admin_harvester_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        await safe_answer(call, "Ruxsat yo'q!", show_alert=True)
+        return
+    await render_admin_harvester_hub(call)
+    await safe_answer(call)
+
+@router.message(Command("harvester"))
+@router.message(Command("radar_admin"))
+async def admin_harvester_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await render_admin_harvester_hub(message)
+
+@router.callback_query(F.data == "admin_reload_groups")
+async def admin_reload_groups_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    from src.harvester.service import default_harvester_service
+    await default_harvester_service.reload_groups()
+    await safe_answer(call, "🔄 Guruhlar ro'yxati RAMda qayta yuklandi!", show_alert=True)
+
+@router.callback_query(F.data == "admin_groups_list")
+async def admin_groups_list_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    groups = await db.get_harvester_groups(active_only=False)
+    if not groups:
+        text = "📋 **Monitoring Guruhlari Ro'yxati**\n\nHozircha birorta ham guruh qo'shilmagan.\n«➕ Guruh qo'shish» tugmasi orqali yangi guruh qo'shing."
+        await call.message.edit_text(text, reply_markup=kb.admin_harvester_hub_kb(), parse_mode="Markdown")
+        await safe_answer(call)
+        return
+
+    text = f"📋 **Monitoring Guruhlari ({len(groups)} ta):**\n\nQuyida Harvester tinglayotgan guruhlar keltirilgan. Guruhni vaqtincha to'xtatish (Pauza) yoki o'chirish mumkin:"
+    markup = kb.admin_groups_list_kb(groups, page=0)
+    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.message(Command("groups"))
+@router.message(Command("harvester_groups"))
+async def admin_groups_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    groups = await db.get_harvester_groups(active_only=False)
+    if not groups:
+        await message.answer("📋 **Monitoring Guruhlari:**\nHozircha birorta ham guruh yo'q.\nQo'shish: `/add_group @username`", parse_mode="Markdown")
+        return
+    text = f"📋 **Monitoring Guruhlari ({len(groups)} ta):**\nBoshqarish uchun tugmalardan foydalaning:"
+    markup = kb.admin_groups_list_kb(groups, page=0)
+    await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+
+@router.callback_query(F.data.startswith("admin_groups_p_"))
+async def admin_groups_page_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    page = int(call.data.replace("admin_groups_p_", ""))
+    groups = await db.get_harvester_groups(active_only=False)
+    text = f"📋 **Monitoring Guruhlari ({len(groups)} ta):**"
+    markup = kb.admin_groups_list_kb(groups, page=page)
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.callback_query(F.data.startswith("group_toggle_"))
+async def group_toggle_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    parts = call.data.split("_")
+    gid = int(parts[2])
+    new_state = bool(int(parts[3]))
+    await db.toggle_harvester_group(gid, new_state)
+    from src.harvester.service import default_harvester_service
+    await default_harvester_service.reload_groups()
+    
+    state_msg = "yoqildi" if new_state else "to'xtatildi"
+    await safe_answer(call, f"Guruh holati {state_msg}!")
+    
+    groups = await db.get_harvester_groups(active_only=False)
+    markup = kb.admin_groups_list_kb(groups, page=0)
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_reply_markup(reply_markup=markup)
+
+@router.callback_query(F.data.startswith("group_del_"))
+async def group_del_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    gid = int(call.data.replace("group_del_", ""))
+    await db.delete_harvester_group(gid)
+    from src.harvester.service import default_harvester_service
+    await default_harvester_service.reload_groups()
+    await safe_answer(call, "Guruh o'chirildi!", show_alert=True)
+    
+    groups = await db.get_harvester_groups(active_only=False)
+    if groups:
+        markup = kb.admin_groups_list_kb(groups, page=0)
+        with contextlib.suppress(TelegramBadRequest):
+            await call.message.edit_reply_markup(reply_markup=markup)
+    else:
+        await render_admin_harvester_hub(call)
+
+@router.callback_query(F.data == "admin_add_group")
+async def admin_add_group_call(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminStates.waiting_for_group_target)
+    text = (
+        "➕ **Monitoring Guruhini Qo'shish**\n\n"
+        "Guruh username yoki havolasini yuboring:\n"
+        "• Misol: `@vodiy_pitak_taxi` yoki `https://t.me/vodiy_toshkent`\n"
+        "• Yoki guruhdan biror xabarni botga forward (uzatish) qiling.\n\n"
+        "Bekor qilish uchun: /cancel"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_harvester")]
+    ])
+    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.message(AdminStates.waiting_for_group_target)
+async def admin_group_target_received(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    target_text = message.text.strip() if message.text else ""
+    if message.forward_from_chat:
+        target_text = str(message.forward_from_chat.id)
+
+    if not target_text or target_text == "/cancel":
+        await state.clear()
+        await message.answer("Bekor qilindi.")
+        await render_admin_harvester_hub(message)
+        return
+
+    wait_msg = await message.answer(f"⏳ `{target_text}` tekshirilmoqda va Telegramdan ma'lumotlar olinmoqda...")
+    from src.harvester.service import default_harvester_service
+    res = await default_harvester_service.resolve_and_join_group(target_text)
+
+    await state.clear()
+    with contextlib.suppress(Exception):
+        await wait_msg.delete()
+
+    if res.get("success"):
+        await message.answer(
+            f"✅ **Guruh monitoringga muvaffaqiyatli qo'shildi!**\n\n"
+            f"📌 **Nomi:** {res.get('title')}\n"
+            f"🆔 **ID:** `{res.get('group_id')}`\n"
+            f"🔗 **Username:** {res.get('username') or 'Mavjud emas'}\n\n"
+            "Endi ushbu guruhdagi barcha yangi e'lonlar real vaqtda tahlil qilinadi!",
+            reply_markup=kb.admin_harvester_hub_kb(),
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            f"❌ **Xatolik:** {res.get('error', 'Guruhni qo\'shib bo\'lmadi')}\n\n"
+            "Iltimos, username to'g'riligini va guruh ochiq (public) ekanligini tekshiring.",
+            reply_markup=kb.admin_harvester_hub_kb(),
+            parse_mode="Markdown"
+        )
+
+@router.message(Command("add_group"))
+async def admin_add_group_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        await message.answer(
+            "⚠️ **Format:** `/add_group <@username | havola | ID>`\n"
+            "Misol: `/add_group @vodiy_pitak_taxi`",
+            parse_mode="Markdown"
+        )
+        return
+    target = parts[1]
+    wait_msg = await message.answer(f"⏳ `{target}` tekshirilmoqda...")
+    from src.harvester.service import default_harvester_service
+    res = await default_harvester_service.resolve_and_join_group(target)
+    with contextlib.suppress(Exception):
+        await wait_msg.delete()
+
+    if res.get("success"):
+        await message.answer(
+            f"✅ **Guruh qo'shildi:** `{res.get('title')}` (ID: `{res.get('group_id')}`)",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(f"❌ **Xatolik:** {res.get('error')}", parse_mode="Markdown")
+
+@router.message(Command("del_group"))
+async def admin_del_group_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2 or not parts[1].lstrip("-").isdigit():
+        await message.answer("⚠️ **Format:** `/del_group <guruh_id>`", parse_mode="Markdown")
+        return
+    gid = int(parts[1])
+    await db.delete_harvester_group(gid)
+    from src.harvester.service import default_harvester_service
+    await default_harvester_service.reload_groups()
+    await message.answer(f"✅ Guruh (ID: `{gid}`) monitoringdan o'chirildi.", parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_recent_orders")
+async def admin_recent_orders_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    orders = await db.get_recent_harvested_orders(limit=10)
+    if not orders:
+        await safe_answer(call, "Hozircha birorta ham buyurtma tutib olinmagan.", show_alert=True)
+        return
+
+    text = "📥 **Oxirgi 10 ta Tutib Olingan Buyurtma:**\n\n"
+    for o in orders:
+        o_type = "👤 Yo'lovchi" if o.get("order_type") == "PASSENGER" else "📦 Pochta"
+        phone = o.get("phone_number") or "Tel yo'q"
+        text += (
+            f"• **#{o['id']} [{o_type}]** `{o.get('origin_district') or '?'}` ➡️ `{o.get('dest_district') or '?'}`\n"
+            f"  📞 {phone} | 👥 {o.get('passenger_count', 1)} ta | ⏱ {o.get('created_at')}\n"
+        )
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Harvester panel", callback_data="admin_harvester")]
+    ])
+    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.callback_query(F.data == "admin_finance")
+async def admin_finance_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    earnings = await db.get_earnings_stats()
+    pending = await db.get_pending_payment_requests()
+    
+    text = (
+        "💰 **Moliya va To'lovlar Markazi**\n\n"
+        f"• 💵 **Jami tasdiqlangan tushum:** {earnings['total_revenue']:,} so'm\n"
+        f"• 📅 **Shu oy tushumi:** {earnings['this_month']:,} so'm\n"
+        f"• ⏳ **O'tgan oy tushumi:** {earnings['last_month']:,} so'm\n"
+        f"• 🧾 **Tasdiqlangan to'lovlar soni:** {earnings['approved_count']} ta\n"
+        f"• ⚠️ **Kutilayotgan cheklar:** {len(pending)} ta\n\n"
+        "🌐 Batafsil veb-panelda: `/finance` sahifasida."
+    )
+    markup = kb.admin_return_kb()
+    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.callback_query(F.data == "admin_users")
+async def admin_users_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    users = await db.get_all_users()
+    now = datetime.utcnow()
+    vips = 0
+    expired = 0
+    trial = 0
+    for u in users:
+        exp = u.get("subscription_expiry")
+        if exp:
+            try:
+                if datetime.strptime(exp, '%Y-%m-%d %H:%M:%S') > now:
+                    vips += 1
+                else:
+                    expired += 1
+            except Exception:
+                expired += 1
+        else:
+            trial += 1
+
+    text = (
+        "👥 **Foydalanuvchilar Statistikasi**\n\n"
+        f"• 👤 **Jami ro'yxatdan o'tganlar:** {len(users)} ta\n"
+        f"• ⭐️ **Faol VIP obunachilar:** {vips} ta\n"
+        f"• 🔴 **Obunasi tugaganlar:** {expired} ta\n"
+        f"• ⚪️ **Sinov / Boshlang'ich:** {trial} ta\n\n"
+        "🌐 Foydalanuvchilarni to'liq boshqarish va qidirish:\n"
+        "Veb-panel `/users` sahifasida mavjud."
+    )
+    markup = kb.admin_return_kb()
+    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.callback_query(F.data == "admin_promos")
+async def admin_promos_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    campaign = await db.get_active_campaign_discount()
+    promos = await db.get_promocodes()
+    
+    text = "🏷 **Chegirmalar va Promolar**\n\n"
+    if campaign:
+        text += (
+            f"🔥 **Faol Aksiya:** `{campaign['title']}`\n"
+            f"⏳ Qolgan vaqt: `{campaign.get('remaining_days', 0)} kun, {campaign.get('remaining_hours', 0)} soat`\n"
+            f"📊 Chegirmalar: `{campaign.get('plan_discounts')}`\n"
+            "To'xtatish: `/stopdiscount`\n\n"
+        )
+    else:
+        text += "⚪️ **Hozirda faol aksiya yo'q.**\nBoshlash: `/setdiscount`\n\n"
+
+    text += f"🎟 **Promokodlar ({len(promos)} ta):**\n"
+    for p in promos[:4]:
+        val_str = f"+{int(p['discount_value'])} kun" if p['discount_type'] == 'DAYS' else f"-{int(p['discount_value'])}%"
+        text += f"• `{p['code']}`: {val_str} ({p['used_count']}/{p['max_uses']})\n"
+
+    text += "\nYangi yaratish: `/newpromo`\n🌐 Veb-panelda: `/discounts` sahifasi."
+    markup = kb.admin_return_kb()
+    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    await safe_answer(call)
+
 
 
 

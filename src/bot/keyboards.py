@@ -290,3 +290,90 @@ def radar_districts_kb(selected_districts: List[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+# ==================== SUPERADMIN CONTROL PANEL KEYBOARDS ====================
+def admin_main_dashboard_kb(userbot_online: bool = False, pending_cheques: int = 0) -> InlineKeyboardMarkup:
+    """Main dashboard keyboard for SuperAdmin account."""
+    hb_icon = "🟢" if userbot_online else "🔴"
+    cheque_badge = f" ({pending_cheques} ta kutilmoqda)" if pending_cheques > 0 else ""
+    
+    keyboard = [
+        [InlineKeyboardButton(text=f"📡 Harvester Radar ({hb_icon} Userbot)", callback_data="admin_harvester")],
+        [
+            InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin_users"),
+            InlineKeyboardButton(text=f"💰 Moliya & Cheklar{cheque_badge}", callback_data="admin_finance")
+        ],
+        [
+            InlineKeyboardButton(text="🏷 Chegirma & Promolar", callback_data="admin_promos"),
+            InlineKeyboardButton(text="📢 Xabarnoma yuborish", callback_data="admin_broadcast")
+        ],
+        [
+            InlineKeyboardButton(text="🚗 Haydovchi rejimini ko'rish (Sinov)", callback_data="admin_driver_view")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def admin_harvester_hub_kb(userbot_online: bool = False) -> InlineKeyboardMarkup:
+    """Control keyboard for Harvester Radar subsystem."""
+    keyboard = [
+        [
+            InlineKeyboardButton(text="➕ Guruh qo'shish", callback_data="admin_add_group"),
+            InlineKeyboardButton(text="📋 Guruhlar ro'yxati", callback_data="admin_groups_list")
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Guruhlarni qayta yuklash", callback_data="admin_reload_groups"),
+            InlineKeyboardButton(text="📥 Oxirgi buyurtmalar", callback_data="admin_recent_orders")
+        ],
+        [InlineKeyboardButton(text="« Asosiy panelga qaytish", callback_data="admin_panel")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def admin_groups_list_kb(groups: List[Dict[str, Any]], page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
+    """Paginated inline keyboard displaying monitored groups with toggle/delete."""
+    keyboard = []
+    total_groups = len(groups)
+    total_pages = max(1, math.ceil(total_groups / per_page))
+    page = max(0, min(page, total_pages - 1))
+    
+    start_idx = page * per_page
+    page_groups = groups[start_idx : start_idx + per_page]
+
+    for g in page_groups:
+        gid = g["group_id"]
+        title = g.get("title") or str(gid)
+        if len(title) > 20:
+            title = title[:18] + ".."
+        is_act = bool(g.get("is_active", True))
+        status_icon = "🟢" if is_act else "⏸"
+        toggle_action = "0" if is_act else "1"
+        toggle_label = "Pauza" if is_act else "Yoqish"
+
+        keyboard.append([
+            InlineKeyboardButton(text=f"{status_icon} {title}", callback_data=f"group_info_{gid}"),
+            InlineKeyboardButton(text=f"{toggle_label}", callback_data=f"group_toggle_{gid}_{toggle_action}"),
+            InlineKeyboardButton(text="🗑", callback_data=f"group_del_{gid}")
+        ])
+
+    # Pagination navigation row
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"admin_groups_p_{page-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"admin_groups_p_{page+1}"))
+    
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([
+        InlineKeyboardButton(text="➕ Guruh qo'shish", callback_data="admin_add_group"),
+        InlineKeyboardButton(text="« Harvester panel", callback_data="admin_harvester")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def admin_return_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Asosiy panelga qaytish", callback_data="admin_panel")]
+    ])
+
+
+

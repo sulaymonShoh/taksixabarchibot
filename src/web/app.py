@@ -63,8 +63,9 @@ class BroadcastRequest(BaseModel):
     text: str
 
 class AddHarvesterGroupRequest(BaseModel):
-    group_id: int
-    title: str
+    target: Optional[str] = None
+    group_id: Optional[int] = None
+    title: Optional[str] = None
     username: Optional[str] = None
     region_tag: str = "ALL"
 
@@ -352,25 +353,33 @@ async def api_broadcast(req: BroadcastRequest, username: str = Depends(verify_cr
     asyncio.create_task(run_broadcast())
     return JSONResponse({"success": True, "total_recipients": len(users)})
 
-# ==================== HARVESTER RADAR (STAGE 5) ====================
+# ==================== HARVESTER RADAR (STAGE 5 & 6) ====================
 
 @app.get("/harvester", response_class=HTMLResponse)
 async def view_harvester(request: Request, username: str = Depends(verify_credentials)):
+    from src.harvester.service import default_harvester_service
     stats = await db.get_harvester_stats()
     groups = await db.get_harvester_groups()
     orders = await db.get_recent_harvested_orders(limit=50)
     pending = await db.get_pending_payment_requests()
+    hb_status = default_harvester_service.get_status()
     return templates.TemplateResponse(request=request, name="harvester.html", context={
         "active_page": "harvester",
         "stats": stats,
         "groups": groups,
         "orders": orders,
-        "pending_count": len(pending)
+        "pending_count": len(pending),
+        "userbot": hb_status
     })
 
 @app.get("/api/harvester/stats")
 async def api_harvester_stats(username: str = Depends(verify_credentials)):
+    from src.harvester.service import default_harvester_service
     stats = await db.get_harvester_stats()
+    hb_status = default_harvester_service.get_status()
+    stats["userbot_online"] = hb_status["is_connected"]
+    stats["userbot_username"] = hb_status.get("user_info", {}).get("username")
+    stats["userbot_phone"] = hb_status.get("user_info", {}).get("phone")
     return JSONResponse(stats)
 
 @app.get("/api/harvester/groups")
@@ -380,22 +389,41 @@ async def api_harvester_groups(active_only: bool = False, username: str = Depend
 
 @app.post("/api/harvester/groups")
 async def api_add_harvester_group(req: AddHarvesterGroupRequest, username: str = Depends(verify_credentials)):
-    group_db_id = await db.add_harvester_group(
-        group_id=req.group_id,
-        title=req.title,
-        username=req.username,
-        region_tag=req.region_tag
-    )
-    return JSONResponse({"success": True, "id": group_db_id})
+    from src.harvester.service import default_harvester_service
+
+    # 1. Direct manual insertion when group_id is explicitly provided
+    if req.group_id:
+        group_db_id = await db.add_harvester_group(
+            group_id=req.group_id,
+            title=req.title or f"Guruh {req.group_id}",
+            username=req.username,
+            region_tag=req.region_tag
+        )
+        await default_harvester_service.reload_groups()
+        return JSONResponse({"success": True, "id": group_db_id})
+
+    # 2. Automated Telethon resolution when only username or link is provided
+    target = (req.target or req.username or "").strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Guruh havolasi, username yoki ID kiritilishi shart")
+
+    res = await default_harvester_service.resolve_and_join_group(target, region_tag=req.region_tag)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Guruhni topib bo'lmadi"))
+    return JSONResponse({"success": True, "id": res.get("group_id"), "title": res.get("title")})
 
 @app.post("/api/harvester/groups/{group_id}/toggle")
 async def api_toggle_harvester_group(group_id: int, req: ToggleHarvesterGroupRequest, username: str = Depends(verify_credentials)):
+    from src.harvester.service import default_harvester_service
     success = await db.toggle_harvester_group(group_id, req.is_active)
+    await default_harvester_service.reload_groups()
     return JSONResponse({"success": success})
 
 @app.post("/api/harvester/groups/{group_id}/delete")
 async def api_delete_harvester_group(group_id: int, username: str = Depends(verify_credentials)):
+    from src.harvester.service import default_harvester_service
     success = await db.delete_harvester_group(group_id)
+    await default_harvester_service.reload_groups()
     return JSONResponse({"success": success})
 
 @app.get("/api/harvester/orders")

@@ -36,11 +36,17 @@ async def main():
     bot.worker_manager = worker_manager
     worker_manager.start_sync_loop()
     
-    # 4. Attach dependencies to FastAPI web state
+    # 4. Initialize Harvester Service (Stage 6)
+    from src.harvester.service import default_harvester_service
+    bot.harvester_service = default_harvester_service
+    web_app.state.harvester_service = default_harvester_service
+    asyncio.create_task(default_harvester_service.start())
+
+    # 5. Attach dependencies to FastAPI web state
     web_app.state.bot = bot
     web_app.state.worker_manager = worker_manager
     
-    # 5. Configure Uvicorn Web Server
+    # 6. Configure Uvicorn Web Server
     uvicorn_config = uvicorn.Config(
         app=web_app,
         host=WEB_HOST,
@@ -52,7 +58,7 @@ async def main():
     
     logger.info(f"Web Admin & Mini App server configured on http://{WEB_HOST}:{WEB_PORT}")
     
-    # 6. Run Bot Polling and Web Server Concurrently
+    # 7. Run Bot Polling and Web Server Concurrently
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         logger.info("Bot polling and Web server starting...")
@@ -65,6 +71,7 @@ async def main():
         pass
     finally:
         logger.info("Gracefully shutting down Taksi Xabarchi services...")
+        await default_harvester_service.stop()
         await worker_manager.stop_all()
         uvicorn_server.should_exit = True
         await bot.session.close()
