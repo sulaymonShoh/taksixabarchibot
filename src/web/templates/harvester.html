@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+{% block title %}Harvester Radar — Taksi Xabarchi{% endblock %}
+{% block content %}
+<div class="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-8">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <div class="flex items-center space-x-2.5">
+                <h2 class="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Harvester Radar & Buyurtmalar Oqimi</h2>
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">v3.0</span>
+            </div>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Superguruhlardan 100% RAMda tutib olinayotgan real mijoz va pochta buyurtmalari monitoringi</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button onclick="openAddGroupModal()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-sm transition shadow-sm flex items-center space-x-2 cursor-pointer">
+                <i class="fa-solid fa-plus"></i>
+                <span>Guruh Qo'shish</span>
+            </button>
+            <button onclick="window.location.reload()" class="p-2.5 rounded-xl bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition shadow-xs cursor-pointer" title="Yangilash">
+                <i class="fa-solid fa-arrows-rotate text-sm"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Live KPI Metric Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <!-- Total Orders -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4.5 backdrop-blur-sm shadow-sm dark:shadow-xl">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Jami Buyurtmalar</span>
+                <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20">
+                    <i class="fa-solid fa-bolt text-xs"></i>
+                </div>
+            </div>
+            <div class="mt-3">
+                <div class="text-2xl font-bold text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
+                    {{ stats.total_orders }}
+                </div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Filtrlangan toza buyurtmalar</div>
+            </div>
+        </div>
+
+        <!-- Today Orders -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4.5 backdrop-blur-sm shadow-sm dark:shadow-xl">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Bugungi Oqim</span>
+                <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20">
+                    <i class="fa-solid fa-clock text-xs"></i>
+                </div>
+            </div>
+            <div class="mt-3">
+                <div class="text-2xl font-bold text-amber-600 dark:text-amber-400 font-mono tracking-tight">
+                    {{ stats.today_orders }}
+                </div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Bugun tutib olingan</div>
+            </div>
+        </div>
+
+        <!-- Passenger vs Cargo -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4.5 backdrop-blur-sm shadow-sm dark:shadow-xl">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Odam / Pochta</span>
+                <div class="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-500/20">
+                    <i class="fa-solid fa-users-line text-xs"></i>
+                </div>
+            </div>
+            <div class="mt-3">
+                <div class="text-2xl font-bold text-slate-900 dark:text-white font-mono tracking-tight">
+                    {{ stats.passenger_orders }} <span class="text-slate-400 text-lg font-normal">/</span> <span class="text-amber-500 text-xl">{{ stats.cargo_orders }}</span>
+                </div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Yo'lovchi va pochta nisbati</div>
+            </div>
+        </div>
+
+        <!-- Monitored Groups -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4.5 backdrop-blur-sm shadow-sm dark:shadow-xl">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Guruhlar Grid</span>
+                <div class="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center border border-purple-500/20">
+                    <i class="fa-solid fa-satellite-dish text-xs"></i>
+                </div>
+            </div>
+            <div class="mt-3">
+                <div class="text-2xl font-bold text-purple-600 dark:text-purple-400 font-mono tracking-tight">
+                    {{ stats.active_groups }} <span class="text-slate-400 text-xs font-normal">/ {{ stats.total_groups }} ta</span>
+                </div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Faol eshitilayotgan guruhlar</div>
+            </div>
+        </div>
+
+        <!-- Active VIP Radar Drivers -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4.5 backdrop-blur-sm shadow-sm dark:shadow-xl">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">VIP Radar Haydovchilar</span>
+                <div class="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-500/20">
+                    <i class="fa-solid fa-tower-broadcast text-xs"></i>
+                </div>
+            </div>
+            <div class="mt-3">
+                <div class="text-2xl font-bold text-indigo-600 dark:text-indigo-400 font-mono tracking-tight">
+                    {{ stats.vip_radar_drivers }} <span class="text-slate-400 text-xs font-normal">/ {{ stats.active_radar_drivers }}</span>
+                </div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Jonli qabul qiluvchi haydovchilar</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section: Monitored Harvester Groups Grid -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl overflow-hidden shadow-sm dark:shadow-xl">
+        <div class="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                    <i class="fa-solid fa-list-check text-sm"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-slate-900 dark:text-white">Monitoring Superguruhlari</h3>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Harvester tinglayotgan Telegram taksi guruhlari</p>
+                </div>
+            </div>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                {{ groups|length }} ta guruh
+            </span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                        <th class="px-5 py-3.5">Guruh Nomi & ID</th>
+                        <th class="px-5 py-3.5">Havola</th>
+                        <th class="px-5 py-3.5">Hudud Tegi</th>
+                        <th class="px-5 py-3.5">Jami Tutildi</th>
+                        <th class="px-5 py-3.5">So'nggi Xabar</th>
+                        <th class="px-5 py-3.5 text-center">Holat</th>
+                        <th class="px-5 py-3.5 text-right">Amal</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-700 dark:text-slate-300">
+                    {% for g in groups %}
+                    <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition">
+                        <td class="px-5 py-3.5">
+                            <div class="font-medium text-slate-900 dark:text-white">{{ g.title }}</div>
+                            <div class="text-xs font-mono text-slate-400 mt-0.5">{{ g.group_id }}</div>
+                        </td>
+                        <td class="px-5 py-3.5">
+                            {% if g.username %}
+                            <a href="https://t.me/{{ g.username.replace('@', '') }}" target="_blank" class="inline-flex items-center text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                                {{ g.username }}
+                                <i class="fa-solid fa-arrow-up-right-from-square ml-1 text-[10px]"></i>
+                            </a>
+                            {% else %}
+                            <span class="text-xs text-slate-400 italic">Yopiq guruh</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-5 py-3.5">
+                            <span class="px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                {{ g.region_tag or 'ALL' }}
+                            </span>
+                        </td>
+                        <td class="px-5 py-3.5 font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                            {{ g.total_harvested }} ta
+                        </td>
+                        <td class="px-5 py-3.5 text-xs text-slate-500 dark:text-slate-400">
+                            {{ g.last_message_at or 'Hali yo\'q' }}
+                        </td>
+                        <td class="px-5 py-3.5 text-center">
+                            <button onclick="toggleGroup({{ g.group_id }}, {{ 0 if g.is_active else 1 }})" class="px-2.5 py-1 rounded-full text-xs font-semibold transition cursor-pointer {% if g.is_active %}bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30{% else %}bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-300 border border-slate-300 dark:border-slate-700{% endif %}">
+                                {% if g.is_active %}<i class="fa-solid fa-circle-check mr-1"></i> Faol{% else %}<i class="fa-solid fa-pause mr-1"></i> Pauza{% endif %}
+                            </button>
+                        </td>
+                        <td class="px-5 py-3.5 text-right">
+                            <button onclick="deleteGroup({{ g.group_id }})" class="text-xs text-rose-500 hover:text-rose-700 p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition cursor-pointer" title="O'chirish">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="px-5 py-8 text-center text-slate-400 italic">
+                            Hozircha monitoring guruhlari kiritilmagan. Yuqoridagi "Guruh Qo'shish" tugmasini bosing.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Section: Live Harvested Orders Stream -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl overflow-hidden shadow-sm dark:shadow-xl">
+        <div class="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                    <i class="fa-solid fa-stream text-sm"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-slate-900 dark:text-white">Jonli Buyurtmalar Oqimi (So'nggi 50 ta)</h3>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Haydovchilarga yuborilayotgan saralangan buyurtmalar</p>
+                </div>
+            </div>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                <i class="fa-solid fa-satellite-dish mr-1 text-[10px]"></i> Real-time
+            </span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                        <th class="px-4 py-3">ID / Vaqt</th>
+                        <th class="px-4 py-3">Turi</th>
+                        <th class="px-4 py-3">Yo'nalish</th>
+                        <th class="px-4 py-3">Mijoz / Aloqa</th>
+                        <th class="px-4 py-3">Manba Guruh</th>
+                        <th class="px-4 py-3">Xabar Matni</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-700 dark:text-slate-300">
+                    {% for o in orders %}
+                    <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition">
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <span class="font-mono font-bold text-slate-900 dark:text-white">#{{ o.id }}</span>
+                            <div class="text-[11px] text-slate-400">{{ o.created_at }}</div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            {% if o.order_type == 'PASSENGER' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                                <i class="fa-solid fa-user mr-1 text-[10px]"></i> {{ o.passenger_count or 1 }} kishi
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                <i class="fa-solid fa-box mr-1 text-[10px]"></i> Pochta
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 font-medium text-slate-900 dark:text-white whitespace-nowrap">
+                            <span class="text-emerald-600 dark:text-emerald-400">{{ o.origin_district or o.origin_region or '?' }}</span>
+                            <i class="fa-solid fa-arrow-right mx-1.5 text-slate-400 text-xs"></i>
+                            <span class="text-blue-600 dark:text-blue-400">{{ o.dest_district or o.dest_region or 'Toshkent' }}</span>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            {% if o.phone_number %}
+                            <div class="font-mono font-semibold text-xs text-slate-900 dark:text-white">{{ o.phone_number }}</div>
+                            {% endif %}
+                            {% if o.telegram_username %}
+                            <a href="https://t.me/{{ o.telegram_username.replace('@', '') }}" target="_blank" class="text-xs text-blue-500 hover:underline">
+                                {{ o.telegram_username }}
+                            </a>
+                            {% endif %}
+                            {% if not o.phone_number and not o.telegram_username %}
+                            <span class="text-xs text-slate-400 italic">Matnda ko'rsatilgan</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                            {{ o.source_group_title or 'Telegram Supergroup' }}
+                        </td>
+                        <td class="px-4 py-3 text-xs text-slate-600 dark:text-slate-300 max-w-xs truncate" title="{{ o.raw_text }}">
+                            <i>"{{ o.raw_text }}"</i>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-4 py-8 text-center text-slate-400 italic">
+                            Hozircha buyurtmalar oqimi mavjud emas. Superguruhlar ulangach, buyurtmalar bu yerda jonli paydo bo'ladi.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Add Harvester Group -->
+<div id="addGroupModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+            <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                <i class="fa-solid fa-satellite-dish text-amber-500"></i>
+                <span>Harvester Guruhi Qo'shish</span>
+            </h3>
+            <button onclick="closeAddGroupModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+        </div>
+
+        <form id="addGroupForm" onsubmit="submitAddGroup(event)" class="space-y-4">
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">Guruh ID (Chat ID) *</label>
+                <input type="number" id="newGroupId" required placeholder="-1001234567890" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-amber-500 font-mono">
+                <span class="text-[11px] text-slate-400">Masalan: -1001928374650</span>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">Guruh Nomi *</label>
+                <input type="text" id="newGroupTitle" required placeholder="Vodiy Toshkent Taksi 24/7" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-amber-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">Telegram Username / Havola</label>
+                <input type="text" id="newGroupUsername" placeholder="@vodiy_toshkent_taksi" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-amber-500">
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">Hudud / Yo'nalish Tegi</label>
+                <select id="newGroupRegionTag" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-amber-500">
+                    <option value="ANDIJON">Andijon ⇄ Toshkent</option>
+                    <option value="VODIY">Vodiy (Farg'ona, Namangan, Andijon)</option>
+                    <option value="TOSHKENT">Toshkent (Viloyat / Shahar)</option>
+                    <option value="SAMARQAND">Samarqand ⇄ Toshkent</option>
+                    <option value="ALL">Barcha yo'nalishlar (ALL)</option>
+                </select>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3 pt-2">
+                <button type="button" onclick="closeAddGroupModal()" class="px-4 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer">
+                    Bekor qilish
+                </button>
+                <button type="submit" class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-sm transition shadow-sm cursor-pointer">
+                    Qo'shish
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function openAddGroupModal() {
+        document.getElementById('addGroupModal').classList.remove('hidden');
+        document.getElementById('addGroupModal').classList.add('flex');
+    }
+
+    function closeAddGroupModal() {
+        document.getElementById('addGroupModal').classList.remove('flex');
+        document.getElementById('addGroupModal').classList.add('hidden');
+    }
+
+    async function submitAddGroup(e) {
+        e.preventDefault();
+        const groupId = parseInt(document.getElementById('newGroupId').value);
+        const title = document.getElementById('newGroupTitle').value.trim();
+        const username = document.getElementById('newGroupUsername').value.trim();
+        const regionTag = document.getElementById('newGroupRegionTag').value;
+
+        try {
+            const res = await fetch('/api/harvester/groups', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    group_id: groupId,
+                    title: title,
+                    username: username || null,
+                    region_tag: regionTag
+                })
+            });
+
+            if (res.ok) {
+                closeAddGroupModal();
+                window.location.reload();
+            } else {
+                const err = await res.json();
+                alert('Xatolik: ' + (err.detail || 'Guruhni qo\'shib bo\'lmadi'));
+            }
+        } catch (err) {
+            alert('Aloqa xatosi: ' + err);
+        }
+    }
+
+    async function toggleGroup(groupId, newState) {
+        try {
+            const res = await fetch(`/api/harvester/groups/${groupId}/toggle`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ is_active: newState === 1 })
+            });
+            if (res.ok) {
+                window.location.reload();
+            }
+        } catch (err) {
+            alert('Xatolik: ' + err);
+        }
+    }
+
+    async function deleteGroup(groupId) {
+        if (!confirm('Haqiqatan ham bu guruhni monitoringdan o\'chirmoqchimisiz?')) return;
+        try {
+            const res = await fetch(`/api/harvester/groups/${groupId}/delete`, {
+                method: 'POST'
+            });
+            if (res.ok) {
+                window.location.reload();
+            }
+        } catch (err) {
+            alert('Xatolik: ' + err);
+        }
+    }
+</script>
+{% endblock %}

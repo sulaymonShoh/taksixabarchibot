@@ -925,6 +925,51 @@ async def get_harvested_orders_count() -> int:
             row = await cursor.fetchone()
             return row[0] if row else 0
 
+async def get_harvester_stats() -> Dict[str, Any]:
+    """Aggregates real-time KPIs for Harvester Web Dashboard."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # 1. Total orders
+        async with db.execute('SELECT COUNT(*) FROM harvested_orders') as cursor:
+            total_orders = (await cursor.fetchone())[0]
+
+        # 2. Today orders
+        async with db.execute(
+            "SELECT COUNT(*) FROM harvested_orders WHERE created_at >= date('now', 'start of day')"
+        ) as cursor:
+            today_orders = (await cursor.fetchone())[0]
+
+        # 3. Passenger vs Cargo
+        async with db.execute(
+            "SELECT COUNT(*) FROM harvested_orders WHERE order_type = 'PASSENGER'"
+        ) as cursor:
+            passenger_orders = (await cursor.fetchone())[0]
+
+        async with db.execute(
+            "SELECT COUNT(*) FROM harvested_orders WHERE order_type = 'CARGO'"
+        ) as cursor:
+            cargo_orders = (await cursor.fetchone())[0]
+
+        # 4. Total groups & active groups
+        async with db.execute('SELECT COUNT(*) FROM harvester_groups') as cursor:
+            total_groups = (await cursor.fetchone())[0]
+
+        async with db.execute('SELECT COUNT(*) FROM harvester_groups WHERE is_active = 1') as cursor:
+            active_groups = (await cursor.fetchone())[0]
+
+    active_drivers = await get_active_radar_drivers()
+    vip_drivers_count = sum(1 for d in active_drivers if d.get("is_vip"))
+
+    return {
+        "total_orders": total_orders,
+        "today_orders": today_orders,
+        "passenger_orders": passenger_orders,
+        "cargo_orders": cargo_orders,
+        "total_groups": total_groups,
+        "active_groups": active_groups,
+        "active_radar_drivers": len(active_drivers),
+        "vip_radar_drivers": vip_drivers_count
+    }
+
 # ==================== DRIVER RADAR PREFERENCES (STAGE 3) ====================
 
 DEFAULT_RADAR_DISTRICTS = ["asaka", "shahrixon", "boston", "andijon_shahar"]
