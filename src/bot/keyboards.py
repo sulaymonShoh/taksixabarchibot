@@ -14,6 +14,9 @@ def main_dashboard_kb(is_authenticated: bool, is_running: bool, drop_author: boo
     
     if not is_authenticated:
         keyboard.append([
+            InlineKeyboardButton(text="🎯 Buyurtmalar Radari", callback_data="radar_menu")
+        ])
+        keyboard.append([
             InlineKeyboardButton(text="📱 Telegram akkauntni ulash", callback_data="start_auth")
         ])
         keyboard.append([
@@ -32,6 +35,7 @@ def main_dashboard_kb(is_authenticated: bool, is_running: bool, drop_author: boo
         callback_data="toggle_drop_author"
     )
     
+    keyboard.append([InlineKeyboardButton(text="🎯 Buyurtmalar Radari", callback_data="radar_menu")])
     keyboard.append([state_btn])
     keyboard.append([InlineKeyboardButton(text="📥 Manba guruhni sozlash", callback_data="set_source_chat")])
     keyboard.append([
@@ -204,4 +208,85 @@ def superadmin_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📢 Ommaviy Xabar (Broadcast)", callback_data="admin_broadcast_msg")],
         [InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")]
     ])
+
+# ==================== V3 DRIVER RADAR KEYBOARDS ====================
+ANDIJON_RADAR_DISTRICTS = [
+    ("asaka", "Asaka"),
+    ("shahrixon", "Shahrixon"),
+    ("boston", "Bo'ston (Bo'z)"),
+    ("marhamat", "Marhamat"),
+    ("andijon_shahar", "Andijon shahar"),
+    ("oltinkol", "Oltinko'l"),
+    ("xojaobod", "Xo'jaobod"),
+    ("buloqboshi", "Buloqboshi"),
+    ("qorgontepa", "Qo'rg'ontepa"),
+    ("jalaquduq", "Jalaquduq"),
+    ("paxtaobod", "Paxtaobod"),
+    ("izboskan", "Izboskan"),
+    ("baliqchi", "Baliqchi"),
+    ("ulugnor", "Ulug'nor"),
+    ("xonobod", "Xonobod"),
+]
+
+def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool) -> InlineKeyboardMarkup:
+    is_active = bool(prefs.get("is_radar_active", True))
+    direction = prefs.get("direction", "both")
+    allow_passenger = bool(prefs.get("allow_passenger", True))
+    allow_cargo = bool(prefs.get("allow_cargo", True))
+    sound_alerts = bool(prefs.get("sound_alerts", True))
+    selected_districts = prefs.get("selected_districts", [])
+    district_count = len(selected_districts) if isinstance(selected_districts, list) else 0
+
+    dir_labels = {
+        "both": "🔀 Toshkent ⇄ Andijon (Ikkala tomon)",
+        "toshkent_to_andijon": "➡️ Toshkent ➡️ Andijon",
+        "andijon_to_toshkent": "⬅️ Andijon ➡️ Toshkent"
+    }
+    dir_text = dir_labels.get(direction, "🔀 Toshkent ⇄ Andijon")
+
+    status_text = "🟢 Radar: YONIQ (Aktiv)" if is_active else "🔴 Radar: O'CHIQ (Pauza)"
+    sound_text = "🔔 Bildirishnoma: Ovozli" if sound_alerts else "🔕 Bildirishnoma: Tovushsiz"
+    pass_icon = "✅" if allow_passenger else "⬜️"
+    cargo_icon = "✅" if allow_cargo else "⬜️"
+
+    keyboard = [
+        [InlineKeyboardButton(text=status_text, callback_data="radar_toggle_state")],
+        [InlineKeyboardButton(text=dir_text, callback_data="radar_toggle_dir")],
+        [
+            InlineKeyboardButton(text=f"{pass_icon} Yo'lovchilar", callback_data="radar_toggle_passenger"),
+            InlineKeyboardButton(text=f"{cargo_icon} Pochta / Yuk", callback_data="radar_toggle_cargo")
+        ],
+        [InlineKeyboardButton(text=f"📍 Tumanlar filtri ({district_count} ta tanlangan)", callback_data="radar_districts")],
+        [InlineKeyboardButton(text=sound_text, callback_data="radar_toggle_sound")]
+    ]
+
+    if not is_vip:
+        keyboard.append([InlineKeyboardButton(text="⭐️ VIP Obunani faollashtirish", callback_data="show_plans")])
+
+    keyboard.append([InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def radar_districts_kb(selected_districts: List[str]) -> InlineKeyboardMarkup:
+    selected_set = set(selected_districts or [])
+    keyboard = []
+
+    # 2 columns layout
+    row = []
+    for d_id, d_name in ANDIJON_RADAR_DISTRICTS:
+        icon = "✅" if d_id in selected_set else "⬜️"
+        row.append(InlineKeyboardButton(text=f"{icon} {d_name}", callback_data=f"radar_district_{d_id}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    # Bulk actions row
+    keyboard.append([
+        InlineKeyboardButton(text="✅ Barchasini tanlash", callback_data="radar_districts_all"),
+        InlineKeyboardButton(text="⬜️ Tozalash", callback_data="radar_districts_clear")
+    ])
+    keyboard.append([InlineKeyboardButton(text="« Radarga qaytish", callback_data="radar_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 

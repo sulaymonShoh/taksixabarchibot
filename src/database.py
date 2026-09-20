@@ -171,6 +171,24 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # Driver radar preferences (Stage 3)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS driver_radar_preferences (
+                user_id BIGINT PRIMARY KEY,
+                is_radar_active BOOLEAN DEFAULT 1,
+                direction TEXT DEFAULT 'both',
+                origin_region TEXT DEFAULT 'andijon',
+                dest_region TEXT DEFAULT 'toshkent_shahar',
+                selected_districts TEXT DEFAULT '["asaka", "shahrixon", "boston", "andijon_shahar"]',
+                allow_passenger BOOLEAN DEFAULT 1,
+                allow_cargo BOOLEAN DEFAULT 1,
+                sound_alerts BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        ''')
         
         await db.commit()
         logger.info("Multi-tenant database initialized successfully.")
@@ -906,5 +924,144 @@ async def get_harvested_orders_count() -> int:
         async with db.execute('SELECT COUNT(*) FROM harvested_orders') as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+# ==================== DRIVER RADAR PREFERENCES (STAGE 3) ====================
+
+DEFAULT_RADAR_DISTRICTS = ["asaka", "shahrixon", "boston", "andijon_shahar"]
+
+async def get_driver_radar_preferences(user_id: int) -> Dict[str, Any]:
+    """
+    Gets driver radar preferences. If none exist, initializes default preferences
+    (Radar ON, Both directions, Asaka/Shahrixon/Bo'ston/Andijon shahar selected).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            'SELECT * FROM driver_radar_preferences WHERE user_id = ?', (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                res = dict(row)
+                if isinstance(res.get("selected_districts"), str):
+                    try:
+                        res["selected_districts"] = json.loads(res["selected_districts"])
+                    except Exception:
+                        res["selected_districts"] = list(DEFAULT_RADAR_DISTRICTS)
+                return res
+
+        # Insert defaults
+        districts_json = json.dumps(DEFAULT_RADAR_DISTRICTS)
+        await db.execute(
+            '''
+            INSERT OR IGNORE INTO driver_radar_preferences (
+                user_id, is_radar_active, direction, origin_region, dest_region,
+                selected_districts, allow_passenger, allow_cargo, sound_alerts
+            ) VALUES (?, 1, 'both', 'andijon', 'toshkent_shahar', ?, 1, 1, 1)
+            ''',
+            (user_id, districts_json)
+        )
+        await db.commit()
+
+        async with db.execute(
+            'SELECT * FROM driver_radar_preferences WHERE user_id = ?', (user_id,)
+        ) as cursor:
+            new_row = await cursor.fetchone()
+            if new_row:
+                res = dict(new_row)
+                res["selected_districts"] = list(DEFAULT_RADAR_DISTRICTS)
+                return res
+            # Fallback if insert or ignore didn't create
+            return {
+                "user_id": user_id,
+                "is_radar_active": 1,
+                "direction": "both",
+                "origin_region": "andijon",
+                "dest_region": "toshkent_shahar",
+                "selected_districts": list(DEFAULT_RADAR_DISTRICTS),
+                "allow_passenger": 1,
+                "allow_cargo": 1,
+                "sound_alerts": 1
+            }
+
+async def update_driver_radar_preferences(user_id: int, **kwargs) -> Dict[str, Any]:
+    """Updates driver radar preferences and returns the updated dict."""
+    # Ensure record exists first
+    await get_driver_radar_preferences(user_id)
+
+    if not kwargs:
+        return await get_driver_radar_preferences(user_id)
+
+    fields = []
+    values = []
+    for key, val in kwargs.items():
+        if key == "selected_districts" and isinstance(val, (list, set)):
+            val = json.dumps(list(val))
+        fields.append(f"{key} = ?")
+        values.append(val)
+
+    fields.append("updated_at = CURRENT_TIMESTAMP")
+    values.append(user_id)
+
+    sql = f"UPDATE driver_radar_preferences SET {', '.join(fields)} WHERE user_id = ?"
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(sql, tuple(values))
+        await db.commit()
+
+    return await get_driver_radar_preferences(user_id)
+
+async def toggle_driver_district(user_id: int, district_id: str) -> List[str]:
+    """Toggles a district ID in the driver's selected_districts list."""
+    prefs = await get_driver_radar_preferences(user_id)
+    districts = prefs.get("selected_districts", [])
+    if not isinstance(districts, list):
+        districts = list(DEFAULT_RADAR_DISTRICTS)
+
+    if district_id in districts:
+        districts.remove(district_id)
+    else:
+        districts.append(district_id)
+
+    await update_driver_radar_preferences(user_id, selected_districts=districts)
+    return districts
+
+async def get_active_radar_drivers() -> List[Dict[str, Any]]:
+    """
+    Returns all active radar drivers joined with their user profile and VIP expiration.
+    Evaluates is_vip (True if subscription_expiry > now UTC).
+    """
+    now = datetime.utcnow()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        sql = '''
+            SELECT p.*, u.full_name, u.username, u.phone_number, u.subscription_expiry, u.is_banned
+            FROM driver_radar_preferences p
+            JOIN users u ON p.user_id = u.user_id
+            WHERE p.is_radar_active = 1 AND (u.is_banned IS NULL OR u.is_banned = 0)
+        '''
+        async with db.execute(sql) as cursor:
+            rows = await cursor.fetchall()
+            drivers = []
+            for r in rows:
+                d = dict(r)
+                if isinstance(d.get("selected_districts"), str):
+                    try:
+                        d["selected_districts"] = json.loads(d["selected_districts"])
+                    except Exception:
+                        d["selected_districts"] = list(DEFAULT_RADAR_DISTRICTS)
+
+                # Evaluate VIP
+                expiry_str = d.get("subscription_expiry")
+                is_vip = False
+                if expiry_str:
+                    try:
+                        exp = datetime.strptime(expiry_str, '%Y-%m-%d %H:%M:%S')
+                        is_vip = (exp > now)
+                    except Exception:
+                        is_vip = False
+                d["is_vip"] = is_vip
+                drivers.append(d)
+            return drivers
+
 
 

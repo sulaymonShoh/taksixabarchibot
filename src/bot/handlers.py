@@ -1515,3 +1515,177 @@ async def admin_newpromo_cmd(message: Message):
     except Exception as e:
         await message.answer(f"❌ Xatolik: {e}")
 
+# ==================== V3 DRIVER RADAR HANDLERS (STAGE 3) ====================
+
+async def render_radar_menu(message_or_call, user_id: int):
+    user = await db.get_user(user_id)
+    sub_badge, is_vip = check_subscription(user.get("subscription_expiry") if user else None)
+    prefs = await db.get_driver_radar_preferences(user_id)
+
+    is_active = bool(prefs.get("is_radar_active", True))
+    direction = prefs.get("direction", "both")
+    allow_passenger = bool(prefs.get("allow_passenger", True))
+    allow_cargo = bool(prefs.get("allow_cargo", True))
+    sound_alerts = bool(prefs.get("sound_alerts", True))
+    selected_districts = prefs.get("selected_districts", [])
+    if not isinstance(selected_districts, list):
+        selected_districts = []
+
+    dir_names = {
+        "both": "Toshkent ⇄ Andijon (Ikkala tomon)",
+        "toshkent_to_andijon": "Toshkent ➡️ Andijon",
+        "andijon_to_toshkent": "Andijon ➡️ Toshkent"
+    }
+    dir_str = dir_names.get(direction, "Toshkent ⇄ Andijon")
+
+    types_list = []
+    if allow_passenger:
+        types_list.append("Yo'lovchi (✅)")
+    if allow_cargo:
+        types_list.append("Pochta/Yuk (✅)")
+    if not types_list:
+        types_list.append("Tanlanmagan (❌)")
+    types_str = " | ".join(types_list)
+
+    district_dict = dict(kb.ANDIJON_RADAR_DISTRICTS)
+    district_names = [district_dict.get(d, d) for d in selected_districts]
+    if district_names:
+        dist_str = ", ".join(district_names[:6])
+        if len(district_names) > 6:
+            dist_str += f" va yana {len(district_names) - 6} ta"
+    else:
+        dist_str = "Barcha tumanlar (Filtrsizz)"
+
+    status_badge = "🟢 YONIQ (Aktiv)" if is_active else "🔴 TO'XTATILGAN (Pauza)"
+    sound_badge = "🔔 Ovozli" if sound_alerts else "🔕 Tovushsiz"
+
+    text = (
+        "🎯 <b>BUYURTMALAR RADARI (v3.0)</b>\n"
+        "<i>Guruhlardagi saralangan toza mijoz va pochta buyurtmalarini soniyada tutib beradi.</i>\n\n"
+        f"⭐️ <b>Obuna holati:</b> {sub_badge}\n"
+        f"📡 <b>Radar:</b> {status_badge}\n"
+        f"🔀 <b>Yo'nalish:</b> {dir_str}\n"
+        f"📦 <b>Buyurtma turi:</b> {types_str}\n"
+        f"🔔 <b>Bildirishnoma:</b> {sound_badge}\n\n"
+        f"📍 <b>Tanlangan tumanlar ({len(selected_districts)} ta):</b>\n"
+        f"• <i>{dist_str}</i>\n\n"
+        "💡 <i>Avtomatlashtirilgan tranzit yo'lak algoritmi siz tanlagan tumanlar va ularga tutash qo'shni tumanlardagi buyurtmalarni sizga yetkazadi!</i>"
+    )
+
+    markup = kb.radar_menu_kb(prefs, is_vip)
+
+    if isinstance(message_or_call, Message):
+        await message_or_call.answer(text, reply_markup=markup, parse_mode="HTML")
+    else:
+        with contextlib.suppress(TelegramBadRequest):
+            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
+async def render_radar_districts(call: CallbackQuery, user_id: int):
+    prefs = await db.get_driver_radar_preferences(user_id)
+    districts = prefs.get("selected_districts", [])
+    if not isinstance(districts, list):
+        districts = []
+
+    text = (
+        "📍 <b>RADAR TUMANLAR FILTRI</b>\n\n"
+        "Qaysi tumanlardan yo'lovchi yoki pochta olmoqchi bo'lsangiz, ularni belgilang.\n"
+        "<i>Tizim tanlangan tumanlar va ularning tranzit yo'lagidagi buyurtmalarni filtrlash uchun xizmat qiladi.</i>\n\n"
+        f"Hozirda tanlangan: <b>{len(districts)} ta tuman</b>"
+    )
+    markup = kb.radar_districts_kb(districts)
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
+@router.message(Command("radar"))
+async def radar_command(message: Message, state: FSMContext):
+    if state:
+        await state.clear()
+    await render_radar_menu(message, message.from_user.id)
+
+@router.callback_query(F.data == "radar_menu")
+async def radar_menu_call(call: CallbackQuery):
+    await render_radar_menu(call, call.from_user.id)
+    await safe_answer(call)
+
+@router.callback_query(F.data == "radar_toggle_state")
+async def radar_toggle_state_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    prefs = await db.get_driver_radar_preferences(user_id)
+    new_state = 0 if prefs.get("is_radar_active", 1) else 1
+    await db.update_driver_radar_preferences(user_id, is_radar_active=new_state)
+    await render_radar_menu(call, user_id)
+    status_msg = "🟢 Radar faollashtirildi!" if new_state else "🔴 Radar to'xtatildi (pauza)!"
+    await safe_answer(call, status_msg)
+
+@router.callback_query(F.data == "radar_toggle_dir")
+async def radar_toggle_dir_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    prefs = await db.get_driver_radar_preferences(user_id)
+    current_dir = prefs.get("direction", "both")
+    cycle = {
+        "both": "toshkent_to_andijon",
+        "toshkent_to_andijon": "andijon_to_toshkent",
+        "andijon_to_toshkent": "both"
+    }
+    next_dir = cycle.get(current_dir, "both")
+    await db.update_driver_radar_preferences(user_id, direction=next_dir)
+    await render_radar_menu(call, user_id)
+    await safe_answer(call)
+
+@router.callback_query(F.data == "radar_toggle_passenger")
+async def radar_toggle_passenger_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    prefs = await db.get_driver_radar_preferences(user_id)
+    new_val = 0 if prefs.get("allow_passenger", 1) else 1
+    await db.update_driver_radar_preferences(user_id, allow_passenger=new_val)
+    await render_radar_menu(call, user_id)
+    await safe_answer(call)
+
+@router.callback_query(F.data == "radar_toggle_cargo")
+async def radar_toggle_cargo_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    prefs = await db.get_driver_radar_preferences(user_id)
+    new_val = 0 if prefs.get("allow_cargo", 1) else 1
+    await db.update_driver_radar_preferences(user_id, allow_cargo=new_val)
+    await render_radar_menu(call, user_id)
+    await safe_answer(call)
+
+@router.callback_query(F.data == "radar_toggle_sound")
+async def radar_toggle_sound_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    prefs = await db.get_driver_radar_preferences(user_id)
+    new_val = 0 if prefs.get("sound_alerts", 1) else 1
+    await db.update_driver_radar_preferences(user_id, sound_alerts=new_val)
+    await render_radar_menu(call, user_id)
+    msg = "🔔 Ovozli bildirishnomalar yoqildi" if new_val else "🔕 Bildirishnomalar tovushsiz rejimga o'tkazildi"
+    await safe_answer(call, msg)
+
+@router.callback_query(F.data == "radar_districts")
+async def radar_districts_call(call: CallbackQuery):
+    await render_radar_districts(call, call.from_user.id)
+    await safe_answer(call)
+
+@router.callback_query(F.data.startswith("radar_district_"))
+async def radar_toggle_district_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    d_id = call.data.replace("radar_district_", "")
+    await db.toggle_driver_district(user_id, d_id)
+    await render_radar_districts(call, user_id)
+    await safe_answer(call)
+
+@router.callback_query(F.data == "radar_districts_all")
+async def radar_districts_all_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    all_districts = [d[0] for d in kb.ANDIJON_RADAR_DISTRICTS]
+    await db.update_driver_radar_preferences(user_id, selected_districts=all_districts)
+    await render_radar_districts(call, user_id)
+    await safe_answer(call, "✅ Barcha tumanlar tanlandi")
+
+@router.callback_query(F.data == "radar_districts_clear")
+async def radar_districts_clear_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    await db.update_driver_radar_preferences(user_id, selected_districts=[])
+    await render_radar_districts(call, user_id)
+    await safe_answer(call, "⬜️ Tumanlar filtri tozalandi")
+
+
