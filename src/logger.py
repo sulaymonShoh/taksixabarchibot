@@ -16,7 +16,7 @@ def setup_logger(name: str) -> logging.Logger:
         # File handler with rotation (5MB per file, max 3 backups)
         log_file = os.path.join(LOG_DIR, "system.log")
         file_handler = RotatingFileHandler(
-            log_file, maxBytes=5 * 1024 * 1024, backupCount=3
+            log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
         )
         file_handler.setFormatter(formatter)
         

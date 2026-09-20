@@ -7,8 +7,8 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
-from aiogram.filters import CommandStart, Command
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramBadRequest
@@ -1010,13 +1010,9 @@ async def toggle_group_call(call: CallbackQuery):
     await safe_answer(call)
 
 # ==================== QUICK GROUP ADD (FORWARD & LINK) ====================
-@router.message(F.forward_from_chat)
-async def forward_group_inspector(message: Message, state: FSMContext):
+@router.message(F.forward_from_chat, StateFilter(None))
+async def forward_group_inspector(message: Message):
     user_id = message.from_user.id
-    current_state = await state.get_state()
-    if current_state == BotStates.waiting_for_source_chat.state:
-        return
-        
     chat = message.forward_from_chat
     if chat.type in ["group", "supergroup"]:
         title = chat.title or f"Guruh {chat.id}"
@@ -1035,12 +1031,9 @@ async def forward_group_inspector(message: Message, state: FSMContext):
     else:
         await message.answer("⚠️ Uzatilgan xabar guruh yoki superguruhdan emas.")
 
-@router.message(F.text.startswith("@") | F.text.contains("t.me/"))
-async def link_group_inspector(message: Message, bot: Bot, state: FSMContext):
+@router.message(F.text & (F.text.startswith("@") | F.text.contains("t.me/")), StateFilter(None))
+async def link_group_inspector(message: Message, bot: Bot):
     user_id = message.from_user.id
-    current_state = await state.get_state()
-    if current_state:
-        return
         
     worker_mgr = getattr(bot, 'worker_manager', None)
     async with auth_flow.user_client_scope(user_id, worker_mgr) as client:
@@ -2092,6 +2085,9 @@ async def claim_order_call(call: CallbackQuery):
 
 async def render_admin_harvester_hub(message_or_call):
     from src.harvester.service import default_harvester_service
+    if not default_harvester_service.is_connected() and default_harvester_service.is_session_available():
+        await default_harvester_service.start()
+
     hb_status = default_harvester_service.get_status()
     is_online = hb_status["is_connected"]
     u_info = hb_status.get("user_info", {})
@@ -2105,29 +2101,29 @@ async def render_admin_harvester_hub(message_or_call):
     cargo_orders = h_stats.get("cargo_orders", 0)
 
     if is_online:
-        u_name = u_info.get("username") or u_info.get("phone") or "Ulangan"
-        status_line = f"🟢 **FAOL** (`{u_name}`, ID: `{u_info.get('id')}`)"
+        u_name = html.escape(str(u_info.get("username") or u_info.get("phone") or "Ulangan"))
+        status_line = f"🟢 <b>FAOL</b> (<code>{u_name}</code>, ID: <code>{u_info.get('id')}</code>)"
     else:
-        status_line = "🔴 **ULANMAGAN**\n*(Userbot sessiyasi ulanmagan)*"
+        status_line = "🔴 <b>ULANMAGAN</b>\n<i>(Userbot sessiyasi ulanmagan)</i>"
 
     text = (
-        "📡 **Harvester Radar — Boshqaruv Markazi**\n\n"
-        f"🤖 **Userbot Tinglovchi Holati:**\n{status_line}\n\n"
-        "📊 **Monitoring Ko'rsatkichlari:**\n"
-        f"• 👥 Faol guruhlar: **{active_groups} ta** / {total_groups} ta jami\n"
-        f"• ⚡️ Bugungi buyurtmalar: **{today_orders} ta**\n"
-        f"• 📦 Jami buyurtmalar: **{total_orders} ta** ({passenger_orders} odam / {cargo_orders} pochta)\n"
-        f"• ⚡️ NLP tahlil tezligi: **< 0.05 ms** (sub-millisekund)\n\n"
+        "📡 <b>Harvester Radar — Boshqaruv Markazi</b>\n\n"
+        f"🤖 <b>Userbot Tinglovchi Holati:</b>\n{status_line}\n\n"
+        "📊 <b>Monitoring Ko'rsatkichlari:</b>\n"
+        f"• 👥 Faol guruhlar: <b>{active_groups} ta</b> / {total_groups} ta jami\n"
+        f"• ⚡️ Bugungi buyurtmalar: <b>{today_orders} ta</b>\n"
+        f"• 📦 Jami buyurtmalar: <b>{total_orders} ta</b> ({passenger_orders} odam / {cargo_orders} pochta)\n"
+        f"• ⚡️ NLP tahlil tezligi: <b>&lt; 0.05 ms</b> (sub-millisekund)\n\n"
         "Quyidagi amallardan birini tanlang:"
     )
 
     markup = kb.admin_harvester_hub_kb(userbot_online=is_online)
 
     if isinstance(message_or_call, Message):
-        await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
+        await message_or_call.answer(text, reply_markup=markup, parse_mode="HTML")
     else:
         with contextlib.suppress(TelegramBadRequest):
-            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
 @router.callback_query(F.data == "admin_harvester")
 async def admin_harvester_call(call: CallbackQuery):
@@ -2150,23 +2146,58 @@ async def admin_reload_groups_call(call: CallbackQuery):
         return
     from src.harvester.service import default_harvester_service
     await default_harvester_service.reload_groups()
-    await safe_answer(call, "🔄 Guruhlar ro'yxati RAMda qayta yuklandi!", show_alert=True)
+    await safe_answer(call, "🔄 Guruhlar ro'yxati va ko'rsatkichlar yangilandi!", show_alert=False)
+    await render_admin_harvester_hub(call)
 
 @router.callback_query(F.data == "admin_groups_list")
 async def admin_groups_list_call(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
+    await safe_answer(call)
     groups = await db.get_harvester_groups(active_only=False)
     if not groups:
-        text = "📋 **Monitoring Guruhlari Ro'yxati**\n\nHozircha birorta ham guruh qo'shilmagan.\n«➕ Guruh qo'shish» tugmasi orqali yangi guruh qo'shing."
-        await call.message.edit_text(text, reply_markup=kb.admin_harvester_hub_kb(), parse_mode="Markdown")
-        await safe_answer(call)
+        text = (
+            "📋 <b>Monitoring Guruhlari Ro'yxati</b>\n\n"
+            "Hozircha birorta ham monitoring guruhi qo'shilmagan.\n"
+            "«➕ Guruh qo'shish» tugmasi orqali yangi superguruh qo'shing."
+        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Guruh qo'shish", callback_data="admin_add_group")],
+            [
+                InlineKeyboardButton(text="🔄 Yangilash", callback_data="admin_groups_list"),
+                InlineKeyboardButton(text="« Harvester panel", callback_data="admin_harvester")
+            ]
+        ])
+        with contextlib.suppress(TelegramBadRequest):
+            await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
         return
 
-    text = f"📋 **Monitoring Guruhlari ({len(groups)} ta):**\n\nQuyida Harvester tinglayotgan guruhlar keltirilgan. Guruhni vaqtincha to'xtatish (Pauza) yoki o'chirish mumkin:"
+    text = f"📋 <b>Monitoring Guruhlari ({len(groups)} ta):</b>\n\nQuyida Harvester tinglayotgan guruhlar keltirilgan. Guruhni vaqtincha to'xtatish (Pauza) yoki o'chirish mumkin:"
     markup = kb.admin_groups_list_kb(groups, page=0)
-    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
+@router.callback_query(F.data == "noop")
+async def noop_call(call: CallbackQuery):
     await safe_answer(call)
+
+@router.callback_query(F.data.startswith("group_info_"))
+async def group_info_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    gid = int(call.data.replace("group_info_", ""))
+    groups = await db.get_harvester_groups(active_only=False)
+    g = next((x for x in groups if x["group_id"] == gid), None)
+    if not g:
+        await safe_answer(call, "Guruh topilmadi!", show_alert=True)
+        return
+    status = "🟢 Faol (Tinglanmoqda)" if g.get("is_active") else "⏸ To'xtatilgan (Pauza)"
+    user_str = f"\nUsername: {g['username']}" if g.get("username") else ""
+    await safe_answer(
+        call,
+        f"📌 {g.get('title')}\nID: {gid}{user_str}\nHolat: {status}\nJami tutildi: {g.get('total_harvested', 0)} ta",
+        show_alert=True
+    )
 
 @router.message(Command("groups"))
 @router.message(Command("harvester_groups"))
@@ -2175,23 +2206,29 @@ async def admin_groups_cmd(message: Message):
         return
     groups = await db.get_harvester_groups(active_only=False)
     if not groups:
-        await message.answer("📋 **Monitoring Guruhlari:**\nHozircha birorta ham guruh yo'q.\nQo'shish: `/add_group @username`", reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
+        await message.answer(
+            "📋 <b>Monitoring Guruhlari:</b>\n"
+            "Hozircha birorta ham monitoring guruhi yo'q.\n"
+            "Qo'shish: <code>/add_group @username</code>",
+            reply_markup=kb.admin_return_kb(),
+            parse_mode="HTML"
+        )
         return
-    text = f"📋 **Monitoring Guruhlari ({len(groups)} ta):**\nBoshqarish uchun tugmalardan foydalaning:"
+    text = f"📋 <b>Monitoring Guruhlari ({len(groups)} ta):</b>\nBoshqarish uchun tugmalardan foydalaning:"
     markup = kb.admin_groups_list_kb(groups, page=0)
-    await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+    await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("admin_groups_p_"))
 async def admin_groups_page_call(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
+    await safe_answer(call)
     page = int(call.data.replace("admin_groups_p_", ""))
     groups = await db.get_harvester_groups(active_only=False)
-    text = f"📋 **Monitoring Guruhlari ({len(groups)} ta):**"
+    text = f"📋 <b>Monitoring Guruhlari ({len(groups)} ta):</b>"
     markup = kb.admin_groups_list_kb(groups, page=page)
     with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    await safe_answer(call)
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("group_toggle_"))
 async def group_toggle_call(call: CallbackQuery):
@@ -2234,58 +2271,69 @@ async def group_del_call(call: CallbackQuery):
 async def admin_add_group_call(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID:
         return
+    await safe_answer(call)
     await state.set_state(AdminStates.waiting_for_group_target)
     text = (
-        "➕ **Monitoring Guruhini Qo'shish**\n\n"
-        "Guruh username yoki havolasini yuboring:\n"
-        "• Misol: `@vodiy_pitak_taxi` yoki `https://t.me/vodiy_toshkent`\n"
-        "• Yoki guruhdan biror xabarni botga forward (uzatish) qiling.\n\n"
-        "Bekor qilish uchun: /cancel"
+        "➕ <b>Monitoring Guruhini Qo'shish</b>\n\n"
+        "Guruh username, havola yoki ID sini yuboring:\n"
+        "• <i>Misol:</i> <code>@vodiy_pitak_taxi</code>\n"
+        "• <i>Havola:</i> <code>https://t.me/vodiy_pitak_taxi</code> yoki <code>https://t.me/+AbCdEf...</code>\n"
+        "• <i>ID:</i> <code>-1001234567890</code>\n"
+        "• Yoki guruhdan biror xabarni ushbu botga uzating (forward qiling).\n\n"
+        "❌ Bekor qilish uchun: /cancel"
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_harvester")]
     ])
-    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    await safe_answer(call)
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
 @router.message(AdminStates.waiting_for_group_target)
 async def admin_group_target_received(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
-    target_text = message.text.strip() if message.text else ""
+    target_text = ""
+    group_title = None
     if message.forward_from_chat:
         target_text = str(message.forward_from_chat.id)
+        group_title = message.forward_from_chat.title
+    elif message.text:
+        target_text = message.text.strip()
+    elif message.caption:
+        target_text = message.caption.strip()
 
     if not target_text or target_text == "/cancel":
         await state.clear()
-        await message.answer("Bekor qilindi.")
+        await message.answer("Bekor qilindi.", reply_markup=kb.admin_return_kb())
         await render_admin_harvester_hub(message)
         return
 
-    wait_msg = await message.answer(f"⏳ `{target_text}` tekshirilmoqda va Telegramdan ma'lumotlar olinmoqda...")
+    wait_msg = await message.answer(f"⏳ <code>{html.escape(target_text)}</code> tekshirilmoqda va Telegramdan ma'lumotlar olinmoqda...", parse_mode="HTML")
     from src.harvester.service import default_harvester_service
-    res = await default_harvester_service.resolve_and_join_group(target_text)
+    res = await default_harvester_service.resolve_and_join_group(target_text, fallback_title=group_title)
 
     await state.clear()
     with contextlib.suppress(Exception):
         await wait_msg.delete()
 
+    is_online = default_harvester_service.is_connected()
     if res.get("success"):
         await message.answer(
-            f"✅ **Guruh monitoringga muvaffaqiyatli qo'shildi!**\n\n"
-            f"📌 **Nomi:** {res.get('title')}\n"
-            f"🆔 **ID:** `{res.get('group_id')}`\n"
-            f"🔗 **Username:** {res.get('username') or 'Mavjud emas'}\n\n"
-            "Endi ushbu guruhdagi barcha yangi e'lonlar real vaqtda tahlil qilinadi!",
-            reply_markup=kb.admin_harvester_hub_kb(),
-            parse_mode="Markdown"
+            f"✅ <b>Guruh monitoringga muvaffaqiyatli qo'shildi!</b>\n\n"
+            f"📌 <b>Nomi:</b> {html.escape(str(res.get('title')))}\n"
+            f"🆔 <b>ID:</b> <code>{res.get('group_id')}</code>\n"
+            f"🔗 <b>Username:</b> {res.get('username') or 'Mavjud emas'}\n\n"
+            "📡 Ushbu guruhdagi barcha yangi e'lonlar real vaqtda tahlil qilinadi!",
+            reply_markup=kb.admin_harvester_hub_kb(userbot_online=is_online),
+            parse_mode="HTML"
         )
     else:
+        err_msg = res.get("error") or "Guruhni qo'shib bo'lmadi"
         await message.answer(
-            f"❌ **Xatolik:** {res.get('error', 'Guruhni qo\'shib bo\'lmadi')}\n\n"
-            "Iltimos, username to'g'riligini va guruh ochiq (public) ekanligini tekshiring.",
-            reply_markup=kb.admin_harvester_hub_kb(),
-            parse_mode="Markdown"
+            f"❌ <b>Xatolik:</b> {html.escape(str(err_msg))}\n\n"
+            "Iltimos, guruh username yoki havolasi to'g'riligini tekshiring.",
+            reply_markup=kb.admin_harvester_hub_kb(userbot_online=is_online),
+            parse_mode="HTML"
         )
 
 @router.message(Command("add_group"))
@@ -2295,14 +2343,14 @@ async def admin_add_group_cmd(message: Message):
     parts = message.text.strip().split()
     if len(parts) < 2:
         await message.answer(
-            "⚠️ **Format:** `/add_group <@username | havola | ID>`\n"
-            "Misol: `/add_group @vodiy_pitak_taxi`",
+            "⚠️ <b>Format:</b> <code>/add_group &lt;@username | havola | ID&gt;</code>\n"
+            "Misol: <code>/add_group @vodiy_pitak_taxi</code>",
             reply_markup=kb.admin_return_kb(),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
     target = parts[1]
-    wait_msg = await message.answer(f"⏳ `{target}` tekshirilmoqda...")
+    wait_msg = await message.answer(f"⏳ <code>{html.escape(target)}</code> tekshirilmoqda...", parse_mode="HTML")
     from src.harvester.service import default_harvester_service
     res = await default_harvester_service.resolve_and_join_group(target)
     with contextlib.suppress(Exception):
@@ -2310,12 +2358,12 @@ async def admin_add_group_cmd(message: Message):
 
     if res.get("success"):
         await message.answer(
-            f"✅ **Guruh qo'shildi:** `{res.get('title')}` (ID: `{res.get('group_id')}`)",
-            reply_markup=kb.admin_return_kb(),
-            parse_mode="Markdown"
+            f"✅ <b>Guruh qo'shildi:</b> <b>{html.escape(str(res.get('title')))}</b> (ID: <code>{res.get('group_id')}</code>)",
+            reply_markup=kb.admin_harvester_hub_kb(userbot_online=default_harvester_service.is_connected()),
+            parse_mode="HTML"
         )
     else:
-        await message.answer(f"❌ **Xatolik:** {res.get('error')}", reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
+        await message.answer(f"❌ <b>Xatolik:</b> {html.escape(str(res.get('error')))}", reply_markup=kb.admin_return_kb(), parse_mode="HTML")
 
 @router.message(Command("del_group"))
 async def admin_del_group_cmd(message: Message):
@@ -2323,121 +2371,48 @@ async def admin_del_group_cmd(message: Message):
         return
     parts = message.text.strip().split()
     if len(parts) < 2 or not parts[1].lstrip("-").isdigit():
-        await message.answer("⚠️ **Format:** `/del_group <guruh_id>`", reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
+        await message.answer("⚠️ <b>Format:</b> <code>/del_group &lt;guruh_id&gt;</code>", reply_markup=kb.admin_return_kb(), parse_mode="HTML")
         return
     gid = int(parts[1])
     await db.delete_harvester_group(gid)
     from src.harvester.service import default_harvester_service
     await default_harvester_service.reload_groups()
-    await message.answer(f"✅ Guruh (ID: `{gid}`) monitoringdan o'chirildi.", reply_markup=kb.admin_return_kb(), parse_mode="Markdown")
+    await message.answer(f"✅ Guruh (ID: <code>{gid}</code>) monitoringdan o'chirildi.", reply_markup=kb.admin_harvester_hub_kb(userbot_online=default_harvester_service.is_connected()), parse_mode="HTML")
 
 @router.callback_query(F.data == "admin_recent_orders")
 async def admin_recent_orders_call(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
+    await safe_answer(call)
     orders = await db.get_recent_harvested_orders(limit=10)
     if not orders:
-        await safe_answer(call, "Hozircha birorta ham buyurtma tutib olinmagan.", show_alert=True)
+        text = (
+            "📥 <b>Oxirgi Buyurtmalar Ro'yxati</b>\n\n"
+            "Hozircha guruhlardan birorta ham buyurtma tutib olinmagan.\n"
+            "Monitoring guruhlariga yangi e'lonlar tushishi bilan bu yerda real vaqtda ko'rinadi."
+        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Yangilash", callback_data="admin_recent_orders")],
+            [InlineKeyboardButton(text="« Harvester panel", callback_data="admin_harvester")]
+        ])
+        with contextlib.suppress(TelegramBadRequest):
+            await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
         return
 
-    text = "📥 **Oxirgi 10 ta Tutib Olingan Buyurtma:**\n\n"
+    text = "📥 <b>Oxirgi 10 ta Tutib Olingan Buyurtma:</b>\n\n"
     for o in orders:
         o_type = "👤 Yo'lovchi" if o.get("order_type") == "PASSENGER" else "📦 Pochta"
         phone = o.get("phone_number") or "Tel yo'q"
+        orig = o.get("origin_district") or "?"
+        dest = o.get("dest_district") or "?"
         text += (
-            f"• **#{o['id']} [{o_type}]** `{o.get('origin_district') or '?'}` ➡️ `{o.get('dest_district') or '?'}`\n"
-            f"  📞 {phone} | 👥 {o.get('passenger_count', 1)} ta | ⏱ {o.get('created_at')}\n"
+            f"• <b>#{o['id']} ({o_type})</b> <code>{html.escape(orig)}</code> ➡️ <code>{html.escape(dest)}</code>\n"
+            f"  📞 {html.escape(phone)} | 👥 {o.get('passenger_count', 1)} ta | ⏱ {o.get('created_at')}\n"
         )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Yangilash", callback_data="admin_recent_orders")],
         [InlineKeyboardButton(text="« Harvester panel", callback_data="admin_harvester")]
     ])
-    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    await safe_answer(call)
-
-@router.callback_query(F.data == "admin_finance")
-async def admin_finance_call(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    earnings = await db.get_earnings_stats()
-    pending = await db.get_pending_payment_requests()
-    
-    text = (
-        "💰 **Moliya va To'lovlar Markazi**\n\n"
-        f"• 💵 **Jami tasdiqlangan tushum:** {earnings['total_revenue']:,} so'm\n"
-        f"• 📅 **Shu oy tushumi:** {earnings['this_month']:,} so'm\n"
-        f"• ⏳ **O'tgan oy tushumi:** {earnings['last_month']:,} so'm\n"
-        f"• 🧾 **Tasdiqlangan to'lovlar soni:** {earnings['approved_count']} ta\n"
-        f"• ⚠️ **Kutilayotgan cheklar:** {len(pending)} ta\n\n"
-        "🌐 Batafsil veb-panelda: `/finance` sahifasida."
-    )
-    markup = kb.admin_return_kb()
-    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    await safe_answer(call)
-
-@router.callback_query(F.data == "admin_users")
-async def admin_users_call(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    users = await db.get_all_users()
-    now = datetime.utcnow()
-    vips = 0
-    expired = 0
-    trial = 0
-    for u in users:
-        exp = u.get("subscription_expiry")
-        if exp:
-            try:
-                if datetime.strptime(exp, '%Y-%m-%d %H:%M:%S') > now:
-                    vips += 1
-                else:
-                    expired += 1
-            except Exception:
-                expired += 1
-        else:
-            trial += 1
-
-    text = (
-        "👥 **Foydalanuvchilar Statistikasi**\n\n"
-        f"• 👤 **Jami ro'yxatdan o'tganlar:** {len(users)} ta\n"
-        f"• ⭐️ **Faol VIP obunachilar:** {vips} ta\n"
-        f"• 🔴 **Obunasi tugaganlar:** {expired} ta\n"
-        f"• ⚪️ **Sinov / Boshlang'ich:** {trial} ta\n\n"
-        "🌐 Foydalanuvchilarni to'liq boshqarish va qidirish:\n"
-        "Veb-panel `/users` sahifasida mavjud."
-    )
-    markup = kb.admin_return_kb()
-    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    await safe_answer(call)
-
-@router.callback_query(F.data == "admin_promos")
-async def admin_promos_call(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    campaign = await db.get_active_campaign_discount()
-    promos = await db.get_promocodes()
-    
-    text = "🏷 **Chegirmalar va Promolar**\n\n"
-    if campaign:
-        text += (
-            f"🔥 **Faol Aksiya:** `{campaign['title']}`\n"
-            f"⏳ Qolgan vaqt: `{campaign.get('remaining_days', 0)} kun, {campaign.get('remaining_hours', 0)} soat`\n"
-            f"📊 Chegirmalar: `{campaign.get('plan_discounts')}`\n"
-            "To'xtatish: `/stopdiscount`\n\n"
-        )
-    else:
-        text += "⚪️ **Hozirda faol aksiya yo'q.**\nBoshlash: `/setdiscount`\n\n"
-
-    text += f"🎟 **Promokodlar ({len(promos)} ta):**\n"
-    for p in promos[:4]:
-        val_str = f"+{int(p['discount_value'])} kun" if p['discount_type'] == 'DAYS' else f"-{int(p['discount_value'])}%"
-        text += f"• `{p['code']}`: {val_str} ({p['used_count']}/{p['max_uses']})\n"
-
-    text += "\nYangi yaratish: `/newpromo`\n🌐 Veb-panelda: `/discounts` sahifasi."
-    markup = kb.admin_return_kb()
-    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    await safe_answer(call)
-
-
-
-
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
