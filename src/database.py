@@ -136,6 +136,41 @@ async def init_db():
                 UNIQUE(promocode_id, user_id)
             )
         ''')
+
+        # Harvester supergroups monitored by the system
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS harvester_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id BIGINT UNIQUE NOT NULL,
+                title TEXT NOT NULL,
+                username TEXT,
+                region_tag TEXT DEFAULT 'ALL',
+                is_active BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_message_at TIMESTAMP,
+                total_harvested INTEGER DEFAULT 0
+            )
+        ''')
+
+        # Harvested orders archive
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS harvested_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_group_id BIGINT,
+                source_group_title TEXT,
+                raw_text TEXT NOT NULL,
+                order_type TEXT NOT NULL,
+                origin_region TEXT,
+                origin_district TEXT,
+                dest_region TEXT,
+                dest_district TEXT,
+                passenger_count INTEGER DEFAULT 1,
+                phone_number TEXT,
+                telegram_username TEXT,
+                message_hash TEXT UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         
         await db.commit()
         logger.info("Multi-tenant database initialized successfully.")
@@ -734,4 +769,142 @@ async def record_promocode_usage(promocode_id: int, user_id: int, plan_months: i
         )
         await db.execute('UPDATE promocodes SET used_count = used_count + 1 WHERE id = ?', (promocode_id,))
         await db.commit()
+
+# ==================== HARVESTER GROUPS & ORDERS DATABASE OPERATIONS ====================
+
+async def add_harvester_group(group_id: int, title: str, username: Optional[str] = None, region_tag: str = 'ALL') -> int:
+    """Adds or updates a monitored Telegram group in the harvester registry."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO harvester_groups (group_id, title, username, region_tag, is_active)
+            VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(group_id) DO UPDATE SET
+                title = excluded.title,
+                username = excluded.username,
+                region_tag = excluded.region_tag,
+                is_active = 1
+            """,
+            (group_id, title, username, region_tag)
+        )
+        await db.commit()
+        async with db.execute('SELECT id FROM harvester_groups WHERE group_id = ?', (group_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+async def get_harvester_groups(active_only: bool = False) -> List[Dict[str, Any]]:
+    """Retrieves list of all monitored harvester groups."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        sql = 'SELECT * FROM harvester_groups'
+        if active_only:
+            sql += ' WHERE is_active = 1'
+        sql += ' ORDER BY id DESC'
+        async with db.execute(sql) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+async def get_harvester_group(group_id: int) -> Optional[Dict[str, Any]]:
+    """Retrieves a single harvester group by its Telegram chat/group ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('SELECT * FROM harvester_groups WHERE group_id = ?', (group_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+async def toggle_harvester_group(group_id: int, is_active: bool) -> bool:
+    """Enables or disables listening for a specific harvester group."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE harvester_groups SET is_active = ? WHERE group_id = ?', (int(is_active), group_id))
+        await db.commit()
+        return True
+
+async def delete_harvester_group(group_id: int) -> bool:
+    """Removes a harvester group from monitoring."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('DELETE FROM harvester_groups WHERE group_id = ?', (group_id,))
+        await db.commit()
+        return True
+
+async def save_harvested_order(order_data: Dict[str, Any]) -> Optional[int]:
+    """
+    Persists a verified passenger/cargo order into the harvested_orders archive.
+    Returns the newly inserted order ID, or None if the message hash already exists (duplicate).
+    """
+    msg_hash = order_data.get("message_hash")
+    raw_text = order_data.get("raw_text") or ""
+    order_type = order_data.get("order_type") or "PASSENGER"
+    origin = order_data.get("origin") or {}
+    dest = order_data.get("destination") or {}
+    source_group_id = order_data.get("source_group_id")
+    source_group_title = order_data.get("source_group_title")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            cursor = await db.execute(
+                """
+                INSERT INTO harvested_orders (
+                    source_group_id, source_group_title, raw_text, order_type,
+                    origin_region, origin_district, dest_region, dest_district,
+                    passenger_count, phone_number, telegram_username, message_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    source_group_id,
+                    source_group_title,
+                    raw_text,
+                    order_type,
+                    origin.get("region_id"),
+                    origin.get("district_id") or origin.get("id"),
+                    dest.get("region_id"),
+                    dest.get("district_id") or dest.get("id"),
+                    order_data.get("passenger_count", 1),
+                    order_data.get("phone_number"),
+                    order_data.get("telegram_username"),
+                    msg_hash
+                )
+            )
+            order_id = cursor.lastrowid
+            
+            # Update group stats if group_id is provided
+            if source_group_id:
+                await db.execute(
+                    """
+                    UPDATE harvester_groups
+                    SET total_harvested = total_harvested + 1,
+                        last_message_at = CURRENT_TIMESTAMP
+                    WHERE group_id = ?
+                    """,
+                    (source_group_id,)
+                )
+            
+            await db.commit()
+            return order_id
+        except aiosqlite.IntegrityError:
+            # Duplicate message hash, ignore safely
+            return None
+
+async def get_recent_harvested_orders(limit: int = 50, region: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieves recent harvested orders for display in admin dashboard and radar stream."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        sql = 'SELECT * FROM harvested_orders'
+        params = []
+        if region:
+            sql += ' WHERE origin_region = ? OR dest_region = ?'
+            params.extend([region, region])
+        sql += ' ORDER BY id DESC LIMIT ?'
+        params.append(limit)
+
+        async with db.execute(sql, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+async def get_harvested_orders_count() -> int:
+    """Returns total number of harvested orders stored in DB."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute('SELECT COUNT(*) FROM harvested_orders') as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
 
