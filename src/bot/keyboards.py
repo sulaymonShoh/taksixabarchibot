@@ -238,11 +238,11 @@ def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool) -> InlineKeyboardMarkup:
     district_count = len(selected_districts) if isinstance(selected_districts, list) else 0
 
     dir_labels = {
-        "both": "🔀 Toshkent ⇄ Andijon (Ikkala tomon)",
-        "toshkent_to_andijon": "➡️ Toshkent ➡️ Andijon",
-        "andijon_to_toshkent": "⬅️ Andijon ➡️ Toshkent"
+        "both": "Toshkent ⇄ Andijon (Ikkala tomon)",
+        "toshkent_to_andijon": "Toshkent ➡️ Andijon",
+        "andijon_to_toshkent": "Andijon ➡️ Toshkent"
     }
-    dir_text = dir_labels.get(direction, "🔀 Toshkent ⇄ Andijon")
+    dir_text = dir_labels.get(direction, "Toshkent ⇄ Andijon")
 
     status_text = "🟢 Radar: YONIQ (Aktiv)" if is_active else "🔴 Radar: O'CHIQ (Pauza)"
     sound_text = "🔔 Bildirishnoma: Ovozli" if sound_alerts else "🔕 Bildirishnoma: Tovushsiz"
