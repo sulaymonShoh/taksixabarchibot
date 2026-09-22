@@ -58,7 +58,9 @@ class OrderParser:
         """Returns True if the message is an advertisement from a driver, spammer, or loan broker."""
         lower = norm_text.lower()
 
-        # Passenger inquiry exception: e.g. "joy bormi", "bitta joy bormi", "mashina bormi", "mashina kerak"
+        # Passenger inquiry exception: e.g. "joy bormi", "bitta joy bormi", "mashina bormi", "mashina kerak", "kimni oldi bo'sh"
+        if re.search(r"\bkimni\s+oldi\s+(?:bo'sh|bosh|bush)\b", lower):
+            return False
         if re.search(r"\b(joy|mashina|moshina|taksi)\s*(bormi|bormikin|topiladimi|kerak|kere)\b", lower):
             return False
 
@@ -78,7 +80,7 @@ class OrderParser:
         """Detects whether intent is CARGO, PASSENGER, or None."""
         lower = norm_text.lower()
 
-        # Check Cargo first (Pochta / Yuk is very distinctive)
+        # Check Cargo first (Pochta / Yuk / Cargo items is very distinctive)
         for phrase in CARGO_ORDER_PHRASES:
             if phrase in lower:
                 return "CARGO"
@@ -137,6 +139,7 @@ class OrderParser:
         Supports:
         - "Toshkentdan Asakaga" (dan/ga suffixes)
         - "Qo'yliq - Shahrixon" (delimiter pattern)
+        - "Andijon Toshkent 3 kishi" (positional sequence pattern)
         - "Bo'stonga pochta bor" (lone destination)
         """
         origin: Optional[Dict[str, Any]] = None
@@ -184,22 +187,43 @@ class OrderParser:
                             destination = cand
                             break
 
-        # Step 3: Scan all known aliases sorted longest-first
+        # Step 3: Positional sequence scan across all known aliases
         if not destination or not origin:
+            found_locs = []
             for alias in self._aliases:
-                # Use word boundary check
                 pattern = r"\b" + re.escape(alias) + r"\b"
-                if re.search(pattern, lower):
+                for m in re.finditer(pattern, lower):
                     loc = resolve_location(alias)
                     if loc:
-                        # Determine if it's origin or destination based on context
-                        if loc.get("entity_type") == "PITAK" and not origin:
-                            origin = loc
-                        elif not destination and loc != origin:
-                            destination = loc
+                        found_locs.append((m.start(), loc))
 
-                if origin and destination:
-                    break
+            found_locs.sort(key=lambda x: x[0])
+            unique_locs = []
+            for pos, loc in found_locs:
+                if not unique_locs or unique_locs[-1]["id"] != loc["id"]:
+                    # If district belongs to same region as preceding general region, prefer specific district
+                    if unique_locs and unique_locs[-1].get("region_id") == loc.get("region_id"):
+                        if loc.get("entity_type") in ("DISTRICT", "PITAK") and unique_locs[-1].get("entity_type") == "REGION":
+                            unique_locs[-1] = loc
+                            continue
+                    unique_locs.append(loc)
+
+            if not origin and not destination:
+                if len(unique_locs) >= 2:
+                    origin = unique_locs[0]
+                    destination = unique_locs[1]
+                elif len(unique_locs) == 1:
+                    destination = unique_locs[0]
+            elif destination and not origin:
+                for loc in unique_locs:
+                    if loc["id"] != destination["id"] and loc.get("region_id") != destination.get("region_id"):
+                        origin = loc
+                        break
+            elif origin and not destination:
+                for loc in unique_locs:
+                    if loc["id"] != origin["id"] and loc.get("region_id") != origin.get("region_id"):
+                        destination = loc
+                        break
 
         return origin, destination
 

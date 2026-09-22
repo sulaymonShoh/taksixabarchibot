@@ -85,6 +85,13 @@ PITAKS: Dict[str, Dict[str, Any]] = {
         "region_id": "toshkent_viloyati",
         "serves_directions": ["sirdaryo", "toshkent_viloyati"],
         "aliases": ["yangi bozor", "янги бозор"]
+    },
+    "malika": {
+        "id": "malika",
+        "name": "Malika Bozori",
+        "region_id": "toshkent_shahar",
+        "serves_directions": ["ALL"],
+        "aliases": ["malika", "malika bozor", "malika bozori", "малика", "малика бозор", "малика бозори", "malika bozordan"]
     }
 }
 
@@ -126,7 +133,8 @@ DISTRICTS: Dict[str, Dict[str, Any]] = {
         "aliases": [
             "andijon", "andijonga", "andijondan", "андижон", "андижан", "андижонга", "андижондан",
             "anjan", "anjanga", "anjandan", "anjon", "anjonga", "anjondan", "анжан", "анжанга", "анжандан", "анжон", "анжонга", "анжондан",
-            "andijon shahar", "andijon shaxar", "eski shahar andijon", "yangi bozor andijon"
+            "andijon shahar", "andijon shaxar", "eski shahar andijon", "yangi bozor andijon",
+            "piyozpoya", "piyos paya", "пиёзпоя", "пиёс пая", "piyozpoyaga", "piyos payaga"
         ],
         "corridor_neighbors": ["asaka", "shahrixon", "oltinkol", "xojaobod", "buloqboshi", "jalaquduq", "paxtaobod"]
     },
@@ -162,7 +170,11 @@ DISTRICTS: Dict[str, Dict[str, Any]] = {
         "id": "izboskan",
         "name": "Izboskan",
         "region_id": "andijon",
-        "aliases": ["izboskan", "избоскан", "poytug", "пойтўғ", "пойтуг"],
+        "aliases": [
+            "izboskan", "избоскан", "izboskandan", "избоскандан", "izboskanga", "избосканга",
+            "poytug", "пойтўғ", "пойтуг", "paytuk", "пайтук", "paytug", "пайтуг",
+            "paytukdan", "пайтукдан", "paytukga", "пайтукга"
+        ],
         "corridor_neighbors": ["baliqchi", "paxtaobod", "oltinkol", "andijon_shahar"]
     },
     "paxtaobod": {
@@ -261,6 +273,30 @@ DISTRICTS: Dict[str, Dict[str, Any]] = {
         "region_id": "toshkent_viloyati",
         "aliases": ["yangiyo'l", "yangiyol", "янгийул", "янгийўл"],
         "corridor_neighbors": ["toshkent_shahar_all", "chinoz"]
+    },
+    "qibray": {
+        "id": "qibray",
+        "name": "Qibray",
+        "region_id": "toshkent_viloyati",
+        "aliases": ["qibray", "қибрай", "кибрай", "qibrayga", "qibraydan"],
+        "corridor_neighbors": ["toshkent_shahar_all", "chirchiq"]
+    },
+    "quyi_chirchiq": {
+        "id": "quyi_chirchiq",
+        "name": "Quyi Chirchiq",
+        "region_id": "toshkent_viloyati",
+        "aliases": [
+            "quyi chirchiq", "quyi chirchik", "қуйи чирчиқ", "куйи чирчик",
+            "quyi chirchikdan", "quyi chirchiqdan", "dostobod"
+        ],
+        "corridor_neighbors": ["toshkent_shahar_all", "chinoz", "yangiyol"]
+    },
+    "sergeli": {
+        "id": "sergeli",
+        "name": "Sergeli",
+        "region_id": "toshkent_shahar",
+        "aliases": ["sergeli", "сергели", "sergili", "sergeliya", "sergilda", "sergeliga"],
+        "corridor_neighbors": ["toshkent_shahar_all"]
     },
     "bekobod": {
         "id": "bekobod",
