@@ -3,6 +3,7 @@ Driver Radar & Highway Corridor Matchmaker for Taksi Xabarchi v3.0.
 Matches real-time incoming harvested passenger and cargo orders with active VIP drivers
 based on their selected route directions, target districts, and transit corridors.
 """
+import html
 from typing import Dict, Any, List, Optional, Tuple
 from src import database as db
 from src.harvester.geo_data import is_in_corridor, get_corridor_districts, DISTRICTS, REGIONS, PITAKS
@@ -235,11 +236,18 @@ class CorridorMatcher:
         if username:
             lines.append(f"💬 <b>Telegram:</b> {username}")
 
+        clean_raw = html.escape(raw_text)
         lines.extend([
             "━━━━━━━━━━━━━━━━━━━━",
-            f"📝 <i>\"{raw_text[:180]}\"</i>",
+            f"📝 <i>\"{clean_raw}\"</i>",
             "━━━━━━━━━━━━━━━━━━━━"
         ])
+
+        source_title = order.get("source_group_title")
+        message_link = order.get("message_link")
+        if message_link:
+            g_title = html.escape(source_title) if source_title else "Guruh"
+            lines.append(f"🔗 <b>Guruhdagi xabar:</b> <a href=\"{message_link}\">{g_title} ↗️</a>")
 
         if match_meta:
             match_type = match_meta.get("match_type")

@@ -60,8 +60,6 @@ DRIVER_AD_PHRASES = frozenset([
     "ael kishi bor", "ael bor",
     "pokiza salon", "toza salon",
     "etkazib berish xizmati", "yetkazib berish xizmati",
-    "mexmonxona", "mehmonxona", "xostel", "hostel", "gostinitsa", "yotoqxona",
-    "obshiy xonalar", "aloxida xonalar", "alohida xonalar",
     "chegirmalar bor", "nomozxon", "namozxon",
     "zaril pochta", "moshina prapan", "mashina propan",
     "kandisoner", "kondisoner", "kanditsoner", "kanditsioner",
@@ -108,8 +106,12 @@ DRIVER_AD_REGEXES: List[Pattern] = [
     re.compile(r"\b(odam|kishi|yo'lovchi|yolovchi)\s*(bormi|bormikin)\s*(olib|obketgani|yurishga)\b", re.IGNORECASE),
     # Phone numbers combined with car types
     re.compile(r"\b(?:cobalt|kobalt|koblt|kobult|kobilt|kubilt|gentra|jentra|nexia|damas|onix|malibu|tracker)\b.*?(?:\+?998\d{9}|\b9\d{8}\b)", re.IGNORECASE),
-    # Hotel / hostel / room rental spam:
-    re.compile(r"\b(?:mexmonxona|mehmonxona|hostel|xostel|gostinitsa|yotoqxona|obshiy\s*xona|aloxida\s*xona|alohida\s*xona|kishi\s*boshiga\s*\d+\s*ming)\b", re.IGNORECASE),
+    # Commercial lodging / hotel / hostel / room rental advertisements:
+    re.compile(
+        r"\b(?:(?:yangi|arzon|lyuks)?\s*(?:mexmonxona|mehmonxona|hostel|xostel)|gostinitsa|yotoqxona)\b.*?\b(?:xona\w*|kishi\s*boshiga|sum|so\'m|kunlik|kruglosutochn\w*|\d+\s*ming)\b"
+        r"|\b(?:obshiy\s*xona\w*|aloxida\s*xona\w*|alohida\s*xona\w*|kunlik\s*(?:kvartira|ijara|arenda))\b",
+        re.IGNORECASE
+    ),
 ]
 
 # ==================== POSITIVE FILTER: PASSENGER ORDER INTENT ====================

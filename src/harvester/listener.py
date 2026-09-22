@@ -48,7 +48,9 @@ class HarvesterListener:
         chat_id: int,
         chat_title: str,
         text: str,
-        sender_username: Optional[str] = None
+        sender_username: Optional[str] = None,
+        message_id: Optional[int] = None,
+        message_link: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Core processing pipeline for any incoming message:
@@ -80,6 +82,10 @@ class HarvesterListener:
         order["message_hash"] = msg_hash
         order["source_group_id"] = chat_id
         order["source_group_title"] = chat_title
+        if message_id:
+            order["message_id"] = message_id
+        if message_link:
+            order["message_link"] = message_link
 
         # 3. Persist order to SQLite database
         order_id = await db.save_harvested_order(order)
@@ -123,17 +129,29 @@ class HarvesterListener:
 
             chat = await event.get_chat()
             chat_title = getattr(chat, "title", str(chat_id))
+            chat_username = getattr(chat, "username", None)
             sender = await event.get_sender()
             sender_username = getattr(sender, "username", None)
             if sender_username:
                 sender_username = f"@{sender_username}"
+
+            message_id = getattr(event, "id", None)
+            message_link = None
+            if message_id:
+                if chat_username:
+                    message_link = f"https://t.me/{chat_username}/{message_id}"
+                else:
+                    clean_id = str(chat_id).replace("-100", "").replace("-", "")
+                    message_link = f"https://t.me/c/{clean_id}/{message_id}"
 
             raw_text = event.raw_text or ""
             await self.process_raw_message(
                 chat_id=chat_id,
                 chat_title=chat_title,
                 text=raw_text,
-                sender_username=sender_username
+                sender_username=sender_username,
+                message_id=message_id,
+                message_link=message_link
             )
 
     async def start(self):

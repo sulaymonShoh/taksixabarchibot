@@ -49,7 +49,8 @@ def mask_raw_text(text: str) -> str:
 def build_order_action_keyboard(
     order_id: int,
     username: Optional[str] = None,
-    is_vip: bool = True
+    is_vip: bool = True,
+    message_link: Optional[str] = None
 ) -> InlineKeyboardMarkup:
     """Constructs Telegram inline action buttons for the order alert."""
     keyboard = []
@@ -59,6 +60,8 @@ def build_order_action_keyboard(
         if username:
             clean_user = username.replace("@", "").strip()
             top_row.append(InlineKeyboardButton(text="💬 Telegram profil", url=f"https://t.me/{clean_user}"))
+        if message_link:
+            top_row.append(InlineKeyboardButton(text="🔗 Asl xabar", url=message_link))
         if top_row:
             keyboard.append(top_row)
 
@@ -153,12 +156,13 @@ class OrderDispatcher:
 
         order_id = order.get("id", 0)
         username = order.get("telegram_username")
+        message_link = order.get("message_link")
         sound_alert = match_meta.get("sound_alerts", True)
 
         try:
             if is_vip:
                 text = self.format_vip_notification(order, match_meta)
-                kb_markup = build_order_action_keyboard(order_id, username, is_vip=True)
+                kb_markup = build_order_action_keyboard(order_id, username, is_vip=True, message_link=message_link)
                 await self.bot.send_message(
                     chat_id=driver_id,
                     text=text,
