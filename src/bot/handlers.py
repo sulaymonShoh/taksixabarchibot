@@ -2382,13 +2382,113 @@ async def group_info_call(call: CallbackQuery):
     if not g:
         await safe_answer(call, "Guruh topilmadi!", show_alert=True)
         return
-    status = "🟢 Faol (Tinglanmoqda)" if g.get("is_active") else "⏸ To'xtatilgan (Pauza)"
-    user_str = f"\nUsername: {g['username']}" if g.get("username") else ""
-    await safe_answer(
-        call,
-        f"📌 {g.get('title')}\nID: {gid}{user_str}\nHolat: {status}\nJami tutildi: {g.get('total_harvested', 0)} ta",
-        show_alert=True
+
+    tag = g.get("region_tag", "andijon")
+    from src.harvester.geo_tagger import parse_tag_string, format_tag_display
+    reg, dist = parse_tag_string(tag)
+    tag_display = format_tag_display(reg, dist)
+
+    is_act = bool(g.get("is_active", True))
+    status_str = "🟢 Faol (Tinglanmoqda)" if is_act else "⏸ To'xtatilgan (Pauza)"
+    toggle_action = "0" if is_act else "1"
+    toggle_label = "⏸ Pauza qilish" if is_act else "🟢 Faollashtirish"
+
+    text = (
+        f"📌 <b>Guruh Ma'lumotlari</b>\n\n"
+        f"<b>Nomi:</b> {html.escape(g.get('title') or str(gid))}\n"
+        f"<b>ID:</b> <code>{gid}</code>\n"
+        f"<b>Username:</b> {g.get('username') or 'Mavjud emas'}\n"
+        f"<b>📍 Hudud tegi:</b> <b>{tag_display}</b>\n"
+        f"<b>Holati:</b> {status_str}\n"
+        f"<b>Jami ushlangan:</b> {g.get('total_harvested', 0)} ta e'lon\n\n"
+        "<i>E'lonlarda shahar ko'rsatilmaganda ushbu hudud tegi asos qilib olinadi.</i>"
     )
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"✏️ Hudud tegi: {tag_display} (O'zgartirish)", callback_data=f"change_group_tag_{gid}")],
+        [
+            InlineKeyboardButton(text=toggle_label, callback_data=f"group_toggle_{gid}_{toggle_action}"),
+            InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"group_del_{gid}")
+        ],
+        [InlineKeyboardButton(text="« Guruhlar ro'yxatiga qaytish", callback_data="admin_groups_list")]
+    ])
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    await safe_answer(call)
+
+@router.callback_query(F.data.startswith("change_group_tag_"))
+async def admin_change_group_tag_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    gid = int(call.data.replace("change_group_tag_", ""))
+    g = await db.get_harvester_group(gid)
+    if not g:
+        await safe_answer(call, "Guruh topilmadi!", show_alert=True)
+        return
+    current_tag = g.get("region_tag", "andijon")
+    from src.harvester.geo_tagger import parse_tag_string, format_tag_display
+    reg, dist = parse_tag_string(current_tag)
+    tag_display = format_tag_display(reg, dist)
+
+    markup = kb.admin_group_tag_picker_kb(gid, current_tag=current_tag)
+    text = (
+        f"📍 <b>Guruh hudud tegini tanlang:</b>\n\n"
+        f"📌 <b>Guruh:</b> {html.escape(g.get('title') or str(gid))}\n"
+        f"🔹 <b>Hozirgi teg:</b> <b>{tag_display}</b> (<code>{current_tag}</code>)\n\n"
+        "<i>Ushbu guruhdagi e'lonlarda qaysi shahar/tuman aytilmagan bo'lsa, tanlangan hudud avtomatik qo'llaniladi.</i>"
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    await safe_answer(call)
+
+@router.callback_query(F.data.startswith("set_group_tag_"))
+async def admin_set_group_tag_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    data_str = call.data.replace("set_group_tag_", "")
+    parts = data_str.split("_", 1)
+    if len(parts) < 2:
+        return
+    gid = int(parts[0])
+    new_tag = parts[1]
+
+    await db.update_harvester_group_tag(gid, new_tag)
+    from src.harvester.service import default_harvester_service
+    await default_harvester_service.reload_groups()
+
+    from src.harvester.geo_tagger import parse_tag_string, format_tag_display
+    reg, dist = parse_tag_string(new_tag)
+    tag_display = format_tag_display(reg, dist)
+
+    await safe_answer(call, f"Hudud tegi o'rnatildi: {tag_display}!", show_alert=True)
+
+    groups = await db.get_harvester_groups(active_only=False)
+    g = next((x for x in groups if x["group_id"] == gid), None)
+    if g:
+        is_act = bool(g.get("is_active", True))
+        status_str = "🟢 Faol (Tinglanmoqda)" if is_act else "⏸ To'xtatilgan (Pauza)"
+        toggle_action = "0" if is_act else "1"
+        toggle_label = "⏸ Pauza qilish" if is_act else "🟢 Faollashtirish"
+        text = (
+            f"📌 <b>Guruh Ma'lumotlari</b>\n\n"
+            f"<b>Nomi:</b> {html.escape(g.get('title') or str(gid))}\n"
+            f"<b>ID:</b> <code>{gid}</code>\n"
+            f"<b>Username:</b> {g.get('username') or 'Mavjud emas'}\n"
+            f"<b>📍 Hudud tegi:</b> <b>{tag_display}</b>\n"
+            f"<b>Holati:</b> {status_str}\n"
+            f"<b>Jami ushlangan:</b> {g.get('total_harvested', 0)} ta e'lon\n\n"
+            "<i>E'lonlarda shahar ko'rsatilmaganda ushbu hudud tegi asos qilib olinadi.</i>"
+        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"✏️ Hudud tegi: {tag_display} (O'zgartirish)", callback_data=f"change_group_tag_{gid}")],
+            [
+                InlineKeyboardButton(text=toggle_label, callback_data=f"group_toggle_{gid}_{toggle_action}"),
+                InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"group_del_{gid}")
+            ],
+            [InlineKeyboardButton(text="« Guruhlar ro'yxatiga qaytish", callback_data="admin_groups_list")]
+        ])
+        with contextlib.suppress(TelegramBadRequest):
+            await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
 @router.message(Command("groups"))
 @router.message(Command("harvester_groups"))
@@ -2509,13 +2609,25 @@ async def admin_group_target_received(message: Message, state: FSMContext):
 
     is_online = default_harvester_service.is_connected()
     if res.get("success"):
+        gid = res.get("group_id")
+        tag = res.get("region_tag", "andijon")
+        from src.harvester.geo_tagger import parse_tag_string, format_tag_display
+        reg, dist = parse_tag_string(tag)
+        tag_display = format_tag_display(reg, dist)
+
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"✏️ Hudud tegi: {tag_display} (O'zgartirish)", callback_data=f"change_group_tag_{gid}")],
+            [InlineKeyboardButton(text="📋 Guruhlar ro'yxati", callback_data="admin_groups_list")],
+            [InlineKeyboardButton(text="« Harvester panel", callback_data="admin_harvester")]
+        ])
         await message.answer(
             f"✅ <b>Guruh monitoringga muvaffaqiyatli qo'shildi!</b>\n\n"
             f"📌 <b>Nomi:</b> {html.escape(str(res.get('title')))}\n"
-            f"🆔 <b>ID:</b> <code>{res.get('group_id')}</code>\n"
-            f"🔗 <b>Username:</b> {res.get('username') or 'Mavjud emas'}\n\n"
+            f"🆔 <b>ID:</b> <code>{gid}</code>\n"
+            f"🔗 <b>Username:</b> {res.get('username') or 'Mavjud emas'}\n"
+            f"📍 <b>Hudud tegi:</b> <b>{tag_display}</b>\n\n"
             "📡 Ushbu guruhdagi barcha yangi e'lonlar real vaqtda tahlil qilinadi!",
-            reply_markup=kb.admin_harvester_hub_kb(userbot_online=is_online),
+            reply_markup=markup,
             parse_mode="HTML"
         )
     else:
@@ -2548,9 +2660,20 @@ async def admin_add_group_cmd(message: Message):
         await wait_msg.delete()
 
     if res.get("success"):
+        gid = res.get("group_id")
+        tag = res.get("region_tag", "andijon")
+        from src.harvester.geo_tagger import parse_tag_string, format_tag_display
+        reg, dist = parse_tag_string(tag)
+        tag_display = format_tag_display(reg, dist)
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"✏️ Hudud tegi: {tag_display} (O'zgartirish)", callback_data=f"change_group_tag_{gid}")],
+            [InlineKeyboardButton(text="📋 Guruhlar ro'yxati", callback_data="admin_groups_list")],
+            [InlineKeyboardButton(text="« Harvester panel", callback_data="admin_harvester")]
+        ])
         await message.answer(
-            f"✅ <b>Guruh qo'shildi:</b> <b>{html.escape(str(res.get('title')))}</b> (ID: <code>{res.get('group_id')}</code>)",
-            reply_markup=kb.admin_harvester_hub_kb(userbot_online=default_harvester_service.is_connected()),
+            f"✅ <b>Guruh qo'shildi:</b> <b>{html.escape(str(res.get('title')))}</b> (ID: <code>{gid}</code>)\n"
+            f"📍 <b>Hudud tegi:</b> <b>{tag_display}</b>",
+            reply_markup=markup,
             parse_mode="HTML"
         )
     else:

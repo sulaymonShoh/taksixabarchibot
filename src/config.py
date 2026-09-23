@@ -18,8 +18,8 @@ PAYMENT_CARD_NUMBER = os.getenv("PAYMENT_CARD_NUMBER", "8600 0000 0000 0000")
 PAYMENT_CARD_HOLDER = os.getenv("PAYMENT_CARD_HOLDER", "ISMI FAMILIYASI")
 
 # Web UI Credentials
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "zypherus")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Qoriy006$")
 WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
 WEB_PORT = int(os.getenv("WEB_PORT", "8000"))
 

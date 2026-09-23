@@ -456,5 +456,51 @@ def admin_return_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="👑 Asosiy panelga qaytish", callback_data="admin_panel")]
     ])
 
+def admin_group_tag_picker_kb(group_id: int, current_tag: Optional[str] = None) -> InlineKeyboardMarkup:
+    """
+    Inline keyboard for SuperAdmin to set or change a group's geographic context tag.
+    Supports 1-tap district tags (Andijon districts) and other provinces.
+    """
+    tags = [
+        ("📍 Andijon (Umumiy)", "andijon"),
+        ("🔹 Asaka", "andijon:asaka"),
+        ("🔹 Shahrixon", "andijon:shahrixon"),
+        ("🔹 Bo'ston (Bo'z)", "andijon:boston"),
+        ("🔹 Marhamat", "andijon:marhamat"),
+        ("🔹 Andijon shahar", "andijon:andijon_shahar"),
+        ("🔹 Oltinko'l", "andijon:oltinkol"),
+        ("🔹 Qurg'ontepa", "andijon:qorgontepa"),
+        ("🔹 Baliqchi", "andijon:baliqchi"),
+        ("🔹 Paxtaobod", "andijon:paxtaobod"),
+        ("🔹 Xo'jaobod", "andijon:xojaobod"),
+        ("🔹 Buloqboshi", "andijon:buloqboshi"),
+        ("🔹 Izboskan", "andijon:izboskan"),
+        ("🔹 Jalolquduq", "andijon:jalolquduq"),
+        ("🔹 Ulug'nor", "andijon:ulugnor"),
+        ("🔹 Xonobod", "andijon:xonobod"),
+        ("🌍 Farg'ona", "fargona"),
+        ("🌍 Namangan", "namangan"),
+        ("🌍 Toshkent", "toshkent"),
+        ("🌍 Samarqand", "samarqand"),
+        ("🌐 Barcha (ALL)", "ALL")
+    ]
+    
+    keyboard = []
+    row = []
+    for label, tag_val in tags:
+        display = f"✅ {label}" if current_tag == tag_val else label
+        row.append(InlineKeyboardButton(text=display, callback_data=f"set_group_tag_{group_id}_{tag_val}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+        
+    keyboard.append([
+        InlineKeyboardButton(text="« Guruh ma'lumotlariga qaytish", callback_data=f"group_info_{group_id}")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 
 

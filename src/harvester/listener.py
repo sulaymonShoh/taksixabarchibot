@@ -89,6 +89,42 @@ class HarvesterListener:
         order["message_hash"] = msg_hash
         order["source_group_id"] = chat_id
         order["source_group_title"] = chat_title
+
+        # Resolve source group metadata and region context
+        group_meta = self._monitored_groups_cache.get(chat_id, {})
+        source_region_tag = group_meta.get("region_tag") or "andijon"
+        order["source_region_tag"] = source_region_tag
+
+        # Geographic Context Inference for Unilateral Orders:
+        # If an order has destination (e.g. Tashkent) but no origin, infer origin from the group tag.
+        # If an order has origin (e.g. Tashkent) but no destination, infer destination from the group tag.
+        if source_region_tag and source_region_tag.upper() != "ALL":
+            from src.harvester.geo_tagger import parse_tag_string, format_tag_display
+            reg, dist = parse_tag_string(source_region_tag)
+            
+            dest = order.get("destination") or order.get("dest") or {}
+            orig = order.get("origin") or {}
+            dest_reg = dest.get("region_id")
+            orig_reg = orig.get("region_id")
+
+            is_dest_toshkent = dest_reg in ("toshkent_shahar", "toshkent_viloyati", "toshkent") or dest.get("id") in ("quyliq", "rohat")
+            is_orig_toshkent = orig_reg in ("toshkent_shahar", "toshkent_viloyati", "toshkent") or orig.get("id") in ("quyliq", "rohat")
+
+            if not orig and is_dest_toshkent:
+                order["origin"] = {
+                    "id": dist or reg,
+                    "name": format_tag_display(reg, dist),
+                    "region_id": reg,
+                    "district_id": dist
+                }
+            elif not dest and is_orig_toshkent:
+                order["destination"] = {
+                    "id": dist or reg,
+                    "name": format_tag_display(reg, dist),
+                    "region_id": reg,
+                    "district_id": dist
+                }
+
         if sender_id:
             order["sender_id"] = sender_id
         if sender_username and not order.get("telegram_username"):

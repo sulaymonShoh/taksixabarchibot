@@ -863,6 +863,13 @@ async def toggle_harvester_group(group_id: int, is_active: bool) -> bool:
         await db.commit()
         return True
 
+async def update_harvester_group_tag(group_id: int, region_tag: str) -> bool:
+    """Updates the region_tag of a monitored harvester group."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE harvester_groups SET region_tag = ? WHERE group_id = ?', (region_tag, group_id))
+        await db.commit()
+        return True
+
 async def delete_harvester_group(group_id: int) -> bool:
     """Removes a harvester group from monitoring."""
     async with aiosqlite.connect(DB_PATH) as db:

@@ -14,6 +14,7 @@ from telethon.errors import UserAlreadyParticipantError
 
 from src.config import API_ID, API_HASH, SESSIONS_DIR, HARVESTER_SESSION_NAME
 from src.harvester.listener import HarvesterListener
+from src.harvester.geo_tagger import detect_group_region
 from src import database as db
 from src.logger import setup_logger
 
@@ -97,10 +98,11 @@ class HarvesterService:
         if self.listener:
             await self.listener.reload_monitored_groups()
 
-    async def resolve_and_join_group(self, target: str, region_tag: str = "andijon", fallback_title: Optional[str] = None) -> Dict[str, Any]:
+    async def resolve_and_join_group(self, target: str, region_tag: Optional[str] = "auto", fallback_title: Optional[str] = None) -> Dict[str, Any]:
         """
         Resolves a group username, invite link, or ID using Telethon.
         If public or invite link, attempts to join the channel/group.
+        Automatically detects geographic context tag from title/username if not specified.
         Saves group to database and triggers in-memory listener reload.
         """
         if not self.is_connected() and self.is_session_available():
@@ -121,15 +123,22 @@ class HarvesterService:
             if len(parts) >= 2 and parts[1].isdigit():
                 clean_target = f"-100{parts[1]}"
 
+        def _compute_tag(title_str: str, user_str: Optional[str]) -> str:
+            if not region_tag or region_tag.lower() in ("auto", "all"):
+                reg, dist = detect_group_region(title_str, user_str or clean_target)
+                return f"{reg}:{dist}" if dist else reg
+            return region_tag
+
         if not self.is_connected() or not self.client:
             # Userbot not online, check if numeric ID
             try:
                 numeric_id = int(clean_target)
                 group_id = numeric_id
                 title = fallback_title or f"Guruh {numeric_id}"
-                await db.add_harvester_group(group_id, title, None, region_tag)
+                final_tag = _compute_tag(title, None)
+                await db.add_harvester_group(group_id, title, None, final_tag)
                 await self.reload_groups()
-                return {"success": True, "group_id": group_id, "title": title, "username": None}
+                return {"success": True, "group_id": group_id, "title": title, "username": None, "region_tag": final_tag}
             except ValueError:
                 return {
                     "success": False,
@@ -169,9 +178,10 @@ class HarvesterService:
                     # If still not found by entity resolution, save directly by numeric ID
                     group_id = numeric_id
                     title = fallback_title or f"Guruh {numeric_id}"
-                    await db.add_harvester_group(group_id, title, None, region_tag)
+                    final_tag = _compute_tag(title, None)
+                    await db.add_harvester_group(group_id, title, None, final_tag)
                     await self.reload_groups()
-                    return {"success": True, "group_id": group_id, "title": title, "username": None}
+                    return {"success": True, "group_id": group_id, "title": title, "username": None, "region_tag": final_tag}
 
             # Case 3: Public username or channel name
             else:
@@ -189,19 +199,22 @@ class HarvesterService:
             if username:
                 username = f"@{username}"
 
+            final_tag = _compute_tag(title, username)
+
             await db.add_harvester_group(
                 group_id=peer_id,
                 title=title,
                 username=username,
-                region_tag=region_tag
+                region_tag=final_tag
             )
             await self.reload_groups()
-            logger.info(f"Resolved and added harvester group: '{title}' (ID: {peer_id})")
+            logger.info(f"Resolved and added harvester group: '{title}' (ID: {peer_id}, Tag: {final_tag})")
             return {
                 "success": True,
                 "group_id": peer_id,
                 "title": title,
-                "username": username
+                "username": username,
+                "region_tag": final_tag
             }
         except Exception as e:
             logger.warning(f"Failed to resolve entity for '{target}': {e}")

@@ -55,6 +55,14 @@ class CorridorMatcher:
         if orig_region == "andijon" and not dest_region:
             return "andijon_to_toshkent"
 
+        # 4. Context fallback from source group region tag
+        source_tag = order.get("source_region_tag", "")
+        if "andijon" in source_tag:
+            if not orig_region and (dest_region in TOSHKENT_REGIONS or dest_dist in PITAKS):
+                return "andijon_to_toshkent"
+            if not dest_region and (orig_region in TOSHKENT_REGIONS or orig_dist in PITAKS):
+                return "toshkent_to_andijon"
+
         return "unknown"
 
     def get_relevant_district(self, order: Dict[str, Any], direction: str) -> Optional[str]:
@@ -115,11 +123,12 @@ class CorridorMatcher:
 
         # 4. Route direction check
         order_dir = self.determine_direction(order)
-        driver_dir = driver_pref.get("direction", "both")
+        if order_dir == "unknown":
+            return None
 
-        if driver_dir != "both" and order_dir != "unknown":
-            if driver_dir != order_dir:
-                return None
+        driver_dir = driver_pref.get("direction", "both")
+        if driver_dir != "both" and driver_dir != order_dir:
+            return None
 
         # 5. District & Corridor Matching
         selected_districts = driver_pref.get("selected_districts", [])

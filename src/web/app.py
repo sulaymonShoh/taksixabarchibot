@@ -72,6 +72,10 @@ class AddHarvesterGroupRequest(BaseModel):
 class ToggleHarvesterGroupRequest(BaseModel):
     is_active: bool
 
+class UpdateHarvesterGroupTagRequest(BaseModel):
+    region_tag: str
+
+
 # ==================== HELPER FUNCTIONS ====================
 def enrich_user_data(u: Dict[str, Any]) -> Dict[str, Any]:
     u_dict = dict(u)
@@ -416,6 +420,13 @@ async def api_add_harvester_group(req: AddHarvesterGroupRequest, username: str =
 async def api_toggle_harvester_group(group_id: int, req: ToggleHarvesterGroupRequest, username: str = Depends(verify_credentials)):
     from src.harvester.service import default_harvester_service
     success = await db.toggle_harvester_group(group_id, req.is_active)
+    await default_harvester_service.reload_groups()
+    return JSONResponse({"success": success})
+
+@app.post("/api/harvester/groups/{group_id}/tag")
+async def api_update_harvester_group_tag(group_id: int, req: UpdateHarvesterGroupTagRequest, username: str = Depends(verify_credentials)):
+    from src.harvester.service import default_harvester_service
+    success = await db.update_harvester_group_tag(group_id, req.region_tag)
     await default_harvester_service.reload_groups()
     return JSONResponse({"success": success})
 
