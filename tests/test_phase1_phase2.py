@@ -25,8 +25,8 @@ async def test_database_multi_tenant():
         
     await db.init_db()
     
-    # 1.1 User creation & 3-day trial
-    u1, is_new1 = await db.get_or_create_user(1001, "Driver One", "driver1")
+    # 1.1 User creation & 3-day trial (explicit grant)
+    u1, is_new1 = await db.get_or_create_user(1001, "Driver One", "driver1", grant_trial=True)
     assert is_new1 is True
     assert u1["user_id"] == 1001
     assert u1["is_lifetime_discount"] == 1
@@ -41,7 +41,7 @@ async def test_database_multi_tenant():
     assert u1_again["subscription_expiry"] == u1["subscription_expiry"]
     
     # 1.3 Second user creation
-    u2, is_new2 = await db.get_or_create_user(1002, "Driver Two", "driver2")
+    u2, is_new2 = await db.get_or_create_user(1002, "Driver Two", "driver2", grant_trial=True)
     assert is_new2 is True
     assert u2["user_id"] == 1002
     

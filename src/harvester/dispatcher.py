@@ -51,7 +51,8 @@ def build_order_action_keyboard(
     username: Optional[str] = None,
     is_vip: bool = True,
     message_link: Optional[str] = None,
-    script: str = "lat"
+    script: str = "lat",
+    can_claim_trial: bool = False
 ) -> InlineKeyboardMarkup:
     """Constructs Telegram inline action buttons for the order alert."""
     keyboard = []
@@ -63,6 +64,11 @@ def build_order_action_keyboard(
         ])
     else:
         # Paywall Teaser Keyboard -> Direct 1-tap conversion button
+        if can_claim_trial:
+            trial_text = "🎁 24 соат бепул синаб кўриш" if script == "cyr" else "🎁 24 soat bepul sinab ko'rish"
+            keyboard.append([
+                InlineKeyboardButton(text=trial_text, callback_data="claim_trial")
+            ])
         vip_cta = "⭐️ VIP Обунани фаоллаштириш (25,000 сўм)" if script == "cyr" else "⭐️ VIP Obunani faollashtirish (25,000 so'm)"
         keyboard.append([
             InlineKeyboardButton(text=vip_cta, callback_data="show_plans")
@@ -159,7 +165,14 @@ class OrderDispatcher:
                     return False
 
                 text = self.format_teaser_notification(order, match_meta, script=script)
-                kb_markup = build_order_action_keyboard(order_id, username, is_vip=False, script=script)
+                can_trial = await db.can_user_claim_trial(driver_id)
+                kb_markup = build_order_action_keyboard(
+                    order_id,
+                    username,
+                    is_vip=False,
+                    script=script,
+                    can_claim_trial=can_trial
+                )
                 await self.bot.send_message(
                     chat_id=driver_id,
                     text=text,

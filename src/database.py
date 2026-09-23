@@ -26,9 +26,16 @@ async def init_db():
                 is_lifetime_discount BOOLEAN DEFAULT 1,
                 is_banned BOOLEAN DEFAULT 0,
                 script TEXT DEFAULT 'lat',
+                has_used_trial BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Check and migrate has_used_trial column if missing
+        async with db.execute("PRAGMA table_info(users)") as cursor:
+            columns = [row[1] for row in await cursor.fetchall()]
+            if 'has_used_trial' not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN has_used_trial BOOLEAN DEFAULT 0")
         
         # User settings table
         await db.execute('''
@@ -205,8 +212,13 @@ async def init_db():
         logger.info("Multi-tenant database initialized successfully.")
 
 # ==================== USER MANAGEMENT ====================
-async def get_or_create_user(user_id: int, full_name: str, username: Optional[str] = None) -> Tuple[Dict[str, Any], bool]:
-    """Gets existing user or creates a new one with a 3-day free VIP trial."""
+async def get_or_create_user(
+    user_id: int,
+    full_name: str,
+    username: Optional[str] = None,
+    grant_trial: bool = False
+) -> Tuple[Dict[str, Any], bool]:
+    """Gets existing user or creates a new one. Trial is on-demand unless grant_trial=True."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)) as cursor:
@@ -222,16 +234,20 @@ async def get_or_create_user(user_id: int, full_name: str, username: Optional[st
                 user_dict['username'] = username
                 return user_dict, False
                 
-        # Brand new user -> Grant 3-day free trial!
-        expiry = datetime.utcnow() + timedelta(days=DEFAULT_TRIAL_DAYS)
-        expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S')
+        # Brand new user
+        expiry_str = None
+        has_used_trial = 0
+        if grant_trial:
+            expiry = datetime.utcnow() + timedelta(days=DEFAULT_TRIAL_DAYS)
+            expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S')
+            has_used_trial = 1
         
         await db.execute(
             '''
-            INSERT INTO users (user_id, full_name, username, subscription_expiry, is_lifetime_discount)
-            VALUES (?, ?, ?, ?, 1)
+            INSERT INTO users (user_id, full_name, username, subscription_expiry, is_lifetime_discount, has_used_trial)
+            VALUES (?, ?, ?, ?, 1, ?)
             ''',
-            (user_id, full_name, username, expiry_str)
+            (user_id, full_name, username, expiry_str, has_used_trial)
         )
         
         # Initialize default user settings
@@ -247,6 +263,50 @@ async def get_or_create_user(user_id: int, full_name: str, username: Optional[st
         async with db.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)) as cursor:
             new_row = await cursor.fetchone()
             return dict(new_row), True
+
+async def activate_user_trial(user_id: int, hours: int = 24) -> Tuple[bool, str]:
+    """
+    Activates the one-time 24-hour on-demand free VIP trial for a user upon pressing 'Bepul sinab ko'rish'.
+    Returns (success, expiry_str_or_error).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)) as cursor:
+            user = await cursor.fetchone()
+            if not user:
+                return False, "Foydalanuvchi topilmadi."
+            
+            user_dict = dict(user)
+            if user_dict.get("has_used_trial", 0):
+                return False, "Siz bepul sinov muddatidan allaqachon foydalangansiz."
+            
+            now = datetime.utcnow()
+            expiry = now + timedelta(hours=hours)
+            expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S')
+            
+            await db.execute(
+                'UPDATE users SET subscription_expiry = ?, has_used_trial = 1 WHERE user_id = ?',
+                (expiry_str, user_id)
+            )
+            await db.commit()
+            return True, expiry_str
+
+async def can_user_claim_trial(user_id: int) -> bool:
+    """Checks if a user is eligible to claim the 24-hour free VIP trial."""
+    user = await get_user(user_id)
+    if not user:
+        return False
+    if user.get("has_used_trial", 0):
+        return False
+    # If user currently has an active subscription, trial is not available
+    expiry_str = user.get("subscription_expiry")
+    if expiry_str:
+        try:
+            if datetime.strptime(expiry_str, '%Y-%m-%d %H:%M:%S') > datetime.utcnow():
+                return False
+        except Exception:
+            pass
+    return True
 
 async def get_user(user_id: int) -> Optional[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:

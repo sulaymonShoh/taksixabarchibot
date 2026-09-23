@@ -217,7 +217,8 @@ async def render_dashboard(message_or_call, user_id: int, state: FSMContext = No
         step3 = t("3. Buyurtmalar yoki E'lon tarqatish xizmatidan foydalaning!", user_script)
         text += f"\n\n{tips_title}\n{step1}\n{step2}\n{step3}"
         
-    markup = kb.main_dashboard_kb(is_authenticated=is_auth, script=user_script)
+    can_trial = await db.can_user_claim_trial(user_id)
+    markup = kb.main_dashboard_kb(is_authenticated=is_auth, script=user_script, can_claim_trial=can_trial)
     if user_id == ADMIN_ID:
         markup.inline_keyboard.insert(0, [
             InlineKeyboardButton(text=t("👑 SuperAdmin Panelga qaytish", user_script), callback_data="admin_panel")
@@ -734,9 +735,49 @@ async def show_plans_call(call: CallbackQuery, state: Optional[FSMContext] = Non
         f"👤 {card_holder_esc}\n\n"
         "👇 O'zingizga ma'qul tarifni tanlang yoki promokod kiriting:"
     )
+    user_script = await db.get_user_script(user_id)
+    can_trial = await db.can_user_claim_trial(user_id)
     with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text(text, reply_markup=kb.pricing_plans_kb(plan_prices), parse_mode="HTML")
+        await call.message.edit_text(text, reply_markup=kb.pricing_plans_kb(plan_prices, script=user_script, can_claim_trial=can_trial), parse_mode="HTML")
     await safe_answer(call)
+
+@router.callback_query(F.data == "claim_trial")
+async def claim_trial_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
+
+    can_claim = await db.can_user_claim_trial(user_id)
+    if not can_claim:
+        await safe_answer(call, t("Siz bepul 24 soatlik sinovdan allaqachon foydalangansiz.", user_script), show_alert=True)
+        return
+
+    success, result = await db.activate_user_trial(user_id, hours=24)
+    if not success:
+        await safe_answer(call, t(str(result), user_script), show_alert=True)
+        return
+
+    # Automatically activate driver radar preferences so they immediately receive leads
+    await db.update_driver_radar_preferences(user_id, is_radar_active=1)
+
+    await safe_answer(call, t("Tabriklaymiz! 24 soatlik bepul VIP faollashtirildi!", user_script), show_alert=True)
+
+    title = t("🎉 TABRIKLAYMIZ!", user_script)
+    body1 = t("Sizga 24 soatlik bepul VIP obuna muvaffaqiyatli faollashtirildi!", user_script)
+    body2 = t("Endi siz guruhlardagi barcha yangi yo'lovchi va pochta buyurtmalarini real vaqtda birinchi bo'lib qabul qilasiz.", user_script)
+    exp_lbl = t("Amal qilish muddati:", user_script)
+
+    text = (
+        f"<b>{title}</b>\n\n"
+        f"💎 {body1}\n\n"
+        f"📡 {body2}\n\n"
+        f"⏳ <b>{exp_lbl}</b> <code>{result}</code> gacha"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t("🎯 Buyurtmalar (Radar)", user_script), callback_data="radar_menu")],
+        [InlineKeyboardButton(text=t("« Asosiy menyu", user_script), callback_data="back_dashboard")]
+    ])
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("buy_plan_"))
 async def select_plan_call(call: CallbackQuery, state: FSMContext):
@@ -2122,7 +2163,8 @@ async def render_radar_menu(message_or_call, user_id: int):
         f"💡 <i>{tip}</i>"
     )
 
-    markup = kb.radar_menu_kb(prefs, is_vip, script=user_script)
+    can_trial = await db.can_user_claim_trial(user_id)
+    markup = kb.radar_menu_kb(prefs, is_vip, script=user_script, can_claim_trial=can_trial)
 
     if isinstance(message_or_call, Message):
         await message_or_call.answer(text, reply_markup=markup, parse_mode="HTML")

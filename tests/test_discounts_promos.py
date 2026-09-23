@@ -26,10 +26,10 @@ async def init_test_db():
     if os.path.exists("data/test_discounts_suite.db"):
         os.remove("data/test_discounts_suite.db")
     await db.init_db()
-    # Create test users
-    await db.get_or_create_user(501, "Test User 1", "user1")
-    await db.get_or_create_user(502, "Test User 2", "user2")
-    await db.get_or_create_user(503, "Test User 3", "user3")
+    # Create test users with active subscriptions for promo extension testing
+    await db.get_or_create_user(501, "Test User 1", "user1", grant_trial=True)
+    await db.get_or_create_user(502, "Test User 2", "user2", grant_trial=True)
+    await db.get_or_create_user(503, "Test User 3", "user3", grant_trial=True)
 
 def run_tests():
     print("=" * 65)

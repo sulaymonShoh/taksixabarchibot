@@ -15,10 +15,12 @@ def main_dashboard_kb(
     is_authenticated: bool,
     is_running: bool = False,
     drop_author: bool = False,
-    script: str = "lat"
+    script: str = "lat",
+    can_claim_trial: bool = False
 ) -> InlineKeyboardMarkup:
     """
     Streamlined Main Dashboard Keyboard:
+    - 🎁 24 soat bepul sinab ko'rish (if eligible)
     - 🎯 Buyurtmalar
     - 📢 E'lon tarqatish
     - 💳 Obunani boshqarish / 🔌 Akkauntni uzish
@@ -35,7 +37,13 @@ def main_dashboard_kb(
 
     lang_text = "🌐 Алифбо: Кирилл 🇺🇿" if script == "cyr" else "🌐 Alifbo: Lotin 🇺🇿"
 
-    keyboard = [
+    keyboard = []
+    if can_claim_trial:
+        keyboard.append([
+            InlineKeyboardButton(text=t("🎁 24 soat bepul sinab ko'rish", script), callback_data="claim_trial")
+        ])
+
+    keyboard.extend([
         [InlineKeyboardButton(text=radar_title, callback_data="radar_menu")],
         [InlineKeyboardButton(text=sender_title, callback_data="sender_menu")],
         [
@@ -43,7 +51,7 @@ def main_dashboard_kb(
             auth_btn
         ],
         [InlineKeyboardButton(text=lang_text, callback_data="toggle_script")]
-    ]
+    ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def sender_menu_kb(
@@ -127,10 +135,15 @@ def logout_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 # ==================== PRICING & SUBSCRIPTION ====================
-def pricing_plans_kb(plan_details: Any = None) -> InlineKeyboardMarkup:
+def pricing_plans_kb(plan_details: Any = None, script: str = "lat", can_claim_trial: bool = False) -> InlineKeyboardMarkup:
     # Dynamic or default plans: 1m (25k), 3m (65k), 6m (120k), 12m (225k UZS)
     keyboard = []
     
+    if can_claim_trial:
+        keyboard.append([
+            InlineKeyboardButton(text=t("🎁 24 soat bepul sinab ko'rish", script), callback_data="claim_trial")
+        ])
+
     if isinstance(plan_details, dict):
         for months in [1, 3, 6, 12]:
             info = plan_details.get(months)
@@ -143,15 +156,15 @@ def pricing_plans_kb(plan_details: Any = None) -> InlineKeyboardMarkup:
                 btn_text = f"{icon} {title} — {price:,} so'm{tag_str}"
                 keyboard.append([InlineKeyboardButton(text=btn_text, callback_data=f"buy_plan_{months}")])
     else:
-        keyboard = [
+        keyboard.extend([
             [InlineKeyboardButton(text="1️⃣ 1 Oy — 25,000 so'm (38% chegirma)", callback_data="buy_plan_1")],
             [InlineKeyboardButton(text="2️⃣ 3 Oy — 65,000 so'm (-10% qo'shimcha)", callback_data="buy_plan_3")],
             [InlineKeyboardButton(text="3️⃣ 6 Oy — 120,000 so'm (-20% qo'shimcha)", callback_data="buy_plan_6")],
             [InlineKeyboardButton(text="4️⃣ 12 Oy + 1 Oy Bepul — 225,000 so'm 🔥", callback_data="buy_plan_12")]
-        ]
+        ])
         
-    keyboard.append([InlineKeyboardButton(text="🎟 Promokod kiritish", callback_data="enter_promocode")])
-    keyboard.append([InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")])
+    keyboard.append([InlineKeyboardButton(text=t("🎟 Promokod kiritish", script), callback_data="enter_promocode")])
+    keyboard.append([InlineKeyboardButton(text=t("« Asosiy menyu", script), callback_data="back_dashboard")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def cancel_promo_kb() -> InlineKeyboardMarkup:
@@ -280,7 +293,7 @@ ANDIJON_RADAR_DISTRICTS = [
     ("xonobod", "Xonobod"),
 ]
 
-def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool, script: str = "lat") -> InlineKeyboardMarkup:
+def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool, script: str = "lat", can_claim_trial: bool = False) -> InlineKeyboardMarkup:
     is_active = bool(prefs.get("is_radar_active", True))
     direction = prefs.get("direction", "both")
     allow_passenger = bool(prefs.get("allow_passenger", True))
@@ -313,6 +326,8 @@ def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool, script: str = "lat") -> I
     ]
 
     if not is_vip:
+        if can_claim_trial:
+            keyboard.append([InlineKeyboardButton(text=t("🎁 24 soat bepul sinab ko'rish", script), callback_data="claim_trial")])
         keyboard.append([InlineKeyboardButton(text=t("⭐️ VIP Obunani faollashtirish", script), callback_data="show_plans")])
 
     keyboard.append([InlineKeyboardButton(text=t("« Asosiy menyu", script), callback_data="back_dashboard")])
