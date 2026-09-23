@@ -207,7 +207,7 @@ class CorridorMatcher:
 
         return matched
 
-    def format_notification(self, order: Dict[str, Any], match_meta: Optional[Dict[str, Any]] = None) -> str:
+    def format_notification(self, order: Dict[str, Any], match_meta: Optional[Dict[str, Any]] = None, script: str = "lat") -> str:
         """
         Formats a clean, minimal Telegram alert for the driver:
         Yo'lovchi (or Pochta)
@@ -220,7 +220,18 @@ class CorridorMatcher:
         Asl xabarni ko'rish
         """
         order_type = order.get("order_type", "PASSENGER")
-        header = "Pochta" if order_type == "CARGO" else "Yo'lovchi"
+        if script == "cyr":
+            header = "Почта" if order_type == "CARGO" else "Йўловчи"
+            lichka_label = "Личка"
+            tel_label = "Тел"
+            asl_link_text = "Асл хабарни"
+            korish_word = "кўриш"
+        else:
+            header = "Pochta" if order_type == "CARGO" else "Yo'lovchi"
+            lichka_label = "Lichka"
+            tel_label = "Tel"
+            asl_link_text = "Asl xabarni"
+            korish_word = "ko'rish"
 
         raw_text = html.escape(order.get("raw_text", "").strip())
         username = order.get("telegram_username")
@@ -237,12 +248,12 @@ class CorridorMatcher:
         contacts = []
         if username:
             clean_user = username.replace("@", "").strip()
-            contacts.append(f'Lichka: <a href="https://t.me/{clean_user}">@{clean_user}</a>')
+            contacts.append(f'{lichka_label}: <a href="https://t.me/{clean_user}">@{clean_user}</a>')
         elif sender_id:
-            contacts.append(f'Lichka: <a href="tg://user?id={sender_id}">{sender_id}</a>')
+            contacts.append(f'{lichka_label}: <a href="tg://user?id={sender_id}">{sender_id}</a>')
 
         if phone:
-            contacts.append(f"Tel: <code>{phone}</code>")
+            contacts.append(f"{tel_label}: <code>{phone}</code>")
 
         if contacts:
             lines.append("")
@@ -250,7 +261,7 @@ class CorridorMatcher:
 
         if message_link:
             lines.append("")
-            lines.append(f'Asl xabarni <a href="{message_link}">ko\'rish</a>')
+            lines.append(f'{asl_link_text} <a href="{message_link}">{korish_word}</a>')
 
         return "\n".join(lines).strip()
 

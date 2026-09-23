@@ -8,60 +8,112 @@ from aiogram.types import (
     ReplyKeyboardRemove
 )
 
+from src.bot.translit import t
+
 # ==================== MAIN USER DASHBOARD ====================
-def main_dashboard_kb(is_authenticated: bool, is_running: bool, drop_author: bool) -> InlineKeyboardMarkup:
+def main_dashboard_kb(
+    is_authenticated: bool,
+    is_running: bool = False,
+    drop_author: bool = False,
+    script: str = "lat"
+) -> InlineKeyboardMarkup:
+    """
+    Streamlined Main Dashboard Keyboard:
+    - 🎯 Buyurtmalar
+    - 📢 E'lon tarqatish
+    - 💳 Obunani boshqarish / 🔌 Akkauntni uzish
+    - 🌐 Alifbo: Lotin / Кирилл
+    """
+    radar_title = t("🎯 Buyurtmalar", script)
+    sender_title = t("📢 E'lon tarqatish", script)
+    sub_title = t("💳 Obunani boshqarish", script)
+    
+    if is_authenticated:
+        auth_btn = InlineKeyboardButton(text=t("🔌 Akkauntni uzish", script), callback_data="logout_confirm")
+    else:
+        auth_btn = InlineKeyboardButton(text=t("📱 Akkauntni ulash", script), callback_data="start_auth")
+
+    lang_text = "🌐 Алифбо: Кирилл 🇺🇿" if script == "cyr" else "🌐 Alifbo: Lotin 🇺🇿"
+
+    keyboard = [
+        [InlineKeyboardButton(text=radar_title, callback_data="radar_menu")],
+        [InlineKeyboardButton(text=sender_title, callback_data="sender_menu")],
+        [
+            InlineKeyboardButton(text=sub_title, callback_data="show_plans"),
+            auth_btn
+        ],
+        [InlineKeyboardButton(text=lang_text, callback_data="toggle_script")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def sender_menu_kb(
+    is_authenticated: bool,
+    is_running: bool = False,
+    drop_author: bool = False,
+    script: str = "lat"
+) -> InlineKeyboardMarkup:
+    """Dedicated menu for automated broadcasting/message sender controls."""
     keyboard = []
     
     if not is_authenticated:
         keyboard.append([
-            InlineKeyboardButton(text="🎯 Buyurtmalar Radari", callback_data="radar_menu")
+            InlineKeyboardButton(text=t("📱 Telegram akkauntni ulash", script), callback_data="start_auth")
         ])
         keyboard.append([
-            InlineKeyboardButton(text="📱 Telegram akkauntni ulash", callback_data="start_auth")
-        ])
-        keyboard.append([
-            InlineKeyboardButton(text="💳 Tariflar va To'lov", callback_data="show_plans"),
-            InlineKeyboardButton(text="ℹ️ Qo'llanma", callback_data="help_info")
+            InlineKeyboardButton(text=t("« Asosiy menyu", script), callback_data="back_dashboard")
         ])
         return InlineKeyboardMarkup(inline_keyboard=keyboard)
         
-    # Authenticated user dashboard
     state_btn = InlineKeyboardButton(
-        text="⏸ To'xtatish (Pauza)" if is_running else "▶️ Boshlash (Aktiv)",
+        text=t("⏸ To'xtatish (Pauza)", script) if is_running else t("▶️ Boshlash (Aktiv)", script),
         callback_data="toggle_state"
     )
     forward_mode_btn = InlineKeyboardButton(
-        text="🔄 Rejim: Toza post (Muallifsiz)" if drop_author else "🔄 Rejim: Asl nusxa (Forwarded)",
+        text=t("🔄 Rejim: Toza post (Muallifsiz)", script) if drop_author else t("🔄 Rejim: Asl nusxa (Forwarded)", script),
         callback_data="toggle_drop_author"
     )
     
-    keyboard.append([InlineKeyboardButton(text="🎯 Buyurtmalar Radari", callback_data="radar_menu")])
     keyboard.append([state_btn])
-    keyboard.append([InlineKeyboardButton(text="📥 Manba guruhni sozlash", callback_data="set_source_chat")])
+    keyboard.append([InlineKeyboardButton(text=t("📥 Manba guruhni sozlash", script), callback_data="set_source_chat")])
     keyboard.append([
-        InlineKeyboardButton(text="⏱ Doira vaqti", callback_data="adjust_timing"),
-        InlineKeyboardButton(text="⚡️ Yuborish tezligi", callback_data="adjust_jitter")
+        InlineKeyboardButton(text=t("⏱ Doira vaqti", script), callback_data="adjust_timing"),
+        InlineKeyboardButton(text=t("⚡️ Yuborish tezligi", script), callback_data="adjust_jitter")
     ])
-    keyboard.append([InlineKeyboardButton(text="👥 Guruhlarni boshqarish", callback_data="manage_groups")])
+    keyboard.append([InlineKeyboardButton(text=t("👥 Guruhlarni boshqarish", script), callback_data="manage_groups")])
     keyboard.append([forward_mode_btn])
-    keyboard.append([InlineKeyboardButton(text="🧪 Sinov yuborish (Test)", callback_data="trigger_test")])
-    keyboard.append([
-        InlineKeyboardButton(text="💳 Obunani uzaytirish", callback_data="show_plans"),
-        InlineKeyboardButton(text="🔌 Akkauntni uzish", callback_data="logout_confirm")
-    ])
+    keyboard.append([InlineKeyboardButton(text=t("🧪 Sinov yuborish (Test)", script), callback_data="trigger_test")])
+    keyboard.append([InlineKeyboardButton(text=t("« Asosiy menyu", script), callback_data="back_dashboard")])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-# ==================== AUTH KEYBOARDS ====================
-def phone_request_kb() -> ReplyKeyboardMarkup:
+# ==================== PERSISTENT REPLY KEYBOARDS (INPUT ROW) ====================
+def main_reply_kb(script: str = "lat") -> ReplyKeyboardMarkup:
+    """Persistent reply keyboard for authenticated users: User manual & Admin support."""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📱 Telefon raqamni yuborish", request_contact=True)],
-            [KeyboardButton(text="❌ Bekor qilish")]
+            [
+                KeyboardButton(text=t("📖 Foydalanish qo'llanmasi", script)),
+                KeyboardButton(text=t("✍️ Adminga yozish", script))
+            ]
         ],
         resize_keyboard=True,
-        one_time_keyboard=True
+        one_time_keyboard=False
     )
+
+def unauth_reply_kb(script: str = "lat") -> ReplyKeyboardMarkup:
+    """Persistent reply keyboard for unauthenticated / first-time users."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=t("📱 Telefon raqamni yuborish", script), request_contact=True)],
+            [KeyboardButton(text=t("❌ Bekor qilish", script))]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+
+def phone_request_kb(script: str = "lat") -> ReplyKeyboardMarkup:
+    """Alias for unauth_reply_kb for backward compatibility."""
+    return unauth_reply_kb(script=script)
 
 def cancel_auth_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -141,9 +193,9 @@ def jitter_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")]
     ])
 
-def back_kb() -> InlineKeyboardMarkup:
+def back_kb(script: str = "lat") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")]
+        [InlineKeyboardButton(text=t("« Asosiy menyu", script), callback_data="back_dashboard")]
     ])
 
 # ==================== PAGINATED TARGET GROUPS ====================
@@ -228,7 +280,7 @@ ANDIJON_RADAR_DISTRICTS = [
     ("xonobod", "Xonobod"),
 ]
 
-def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool) -> InlineKeyboardMarkup:
+def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool, script: str = "lat") -> InlineKeyboardMarkup:
     is_active = bool(prefs.get("is_radar_active", True))
     direction = prefs.get("direction", "both")
     allow_passenger = bool(prefs.get("allow_passenger", True))
@@ -238,14 +290,14 @@ def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool) -> InlineKeyboardMarkup:
     district_count = len(selected_districts) if isinstance(selected_districts, list) else 0
 
     dir_labels = {
-        "both": "Toshkent ⇄ Andijon (Ikkala tomon)",
-        "toshkent_to_andijon": "Toshkent ➡️ Andijon",
-        "andijon_to_toshkent": "Andijon ➡️ Toshkent"
+        "both": t("Toshkent ⇄ Andijon (Ikkala tomon)", script),
+        "toshkent_to_andijon": t("Toshkent ➡️ Andijon", script),
+        "andijon_to_toshkent": t("Andijon ➡️ Toshkent", script)
     }
-    dir_text = dir_labels.get(direction, "Toshkent ⇄ Andijon")
+    dir_text = dir_labels.get(direction, t("Toshkent ⇄ Andijon", script))
 
-    status_text = "🟢 Radar: YONIQ (Aktiv)" if is_active else "🔴 Radar: O'CHIQ (Pauza)"
-    sound_text = "🔔 Bildirishnoma: Ovozli" if sound_alerts else "🔕 Bildirishnoma: Tovushsiz"
+    status_text = t("🟢 Radar: YONIQ (Aktiv)", script) if is_active else t("🔴 Radar: O'CHIQ (Pauza)", script)
+    sound_text = t("🔔 Bildirishnoma: Ovozli", script) if sound_alerts else t("🔕 Bildirishnoma: Tovushsiz", script)
     pass_icon = "✅" if allow_passenger else "⬜️"
     cargo_icon = "✅" if allow_cargo else "⬜️"
 
@@ -253,20 +305,20 @@ def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=status_text, callback_data="radar_toggle_state")],
         [InlineKeyboardButton(text=dir_text, callback_data="radar_toggle_dir")],
         [
-            InlineKeyboardButton(text=f"{pass_icon} Yo'lovchilar", callback_data="radar_toggle_passenger"),
-            InlineKeyboardButton(text=f"{cargo_icon} Pochta / Yuk", callback_data="radar_toggle_cargo")
+            InlineKeyboardButton(text=f"{pass_icon} {t('Yo\'lovchilar', script)}", callback_data="radar_toggle_passenger"),
+            InlineKeyboardButton(text=f"{cargo_icon} {t('Pochta / Yuk', script)}", callback_data="radar_toggle_cargo")
         ],
-        [InlineKeyboardButton(text=f"📍 Tumanlar filtri ({district_count} ta tanlangan)", callback_data="radar_districts")],
+        [InlineKeyboardButton(text=t(f"📍 Tumanlar filtri ({district_count} ta tanlangan)", script), callback_data="radar_districts")],
         [InlineKeyboardButton(text=sound_text, callback_data="radar_toggle_sound")]
     ]
 
     if not is_vip:
-        keyboard.append([InlineKeyboardButton(text="⭐️ VIP Obunani faollashtirish", callback_data="show_plans")])
+        keyboard.append([InlineKeyboardButton(text=t("⭐️ VIP Obunani faollashtirish", script), callback_data="show_plans")])
 
-    keyboard.append([InlineKeyboardButton(text="« Asosiy menyu", callback_data="back_dashboard")])
+    keyboard.append([InlineKeyboardButton(text=t("« Asosiy menyu", script), callback_data="back_dashboard")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def radar_districts_kb(selected_districts: List[str]) -> InlineKeyboardMarkup:
+def radar_districts_kb(selected_districts: List[str], script: str = "lat") -> InlineKeyboardMarkup:
     selected_set = set(selected_districts or [])
     keyboard = []
 
@@ -274,7 +326,7 @@ def radar_districts_kb(selected_districts: List[str]) -> InlineKeyboardMarkup:
     row = []
     for d_id, d_name in ANDIJON_RADAR_DISTRICTS:
         icon = "✅" if d_id in selected_set else "⬜️"
-        row.append(InlineKeyboardButton(text=f"{icon} {d_name}", callback_data=f"radar_district_{d_id}"))
+        row.append(InlineKeyboardButton(text=f"{icon} {t(d_name, script)}", callback_data=f"radar_district_{d_id}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
@@ -283,10 +335,10 @@ def radar_districts_kb(selected_districts: List[str]) -> InlineKeyboardMarkup:
 
     # Bulk actions row
     keyboard.append([
-        InlineKeyboardButton(text="✅ Barchasini tanlash", callback_data="radar_districts_all"),
-        InlineKeyboardButton(text="⬜️ Tozalash", callback_data="radar_districts_clear")
+        InlineKeyboardButton(text=t("✅ Barchasini tanlash", script), callback_data="radar_districts_all"),
+        InlineKeyboardButton(text=t("⬜️ Tozalash", script), callback_data="radar_districts_clear")
     ])
-    keyboard.append([InlineKeyboardButton(text="« Radarga qaytish", callback_data="radar_menu")])
+    keyboard.append([InlineKeyboardButton(text=t("« Radarga qaytish", script), callback_data="radar_menu")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 

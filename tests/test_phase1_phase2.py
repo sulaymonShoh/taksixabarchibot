@@ -117,20 +117,31 @@ def test_keyboards():
     # Unauthenticated dashboard
     kb_unauth = kb.main_dashboard_kb(is_authenticated=False, is_running=False, drop_author=False)
     unauth_callbacks = [btn.callback_data for row in kb_unauth.inline_keyboard for btn in row if btn.callback_data]
+    assert "radar_menu" in unauth_callbacks
+    assert "sender_menu" in unauth_callbacks
     assert "start_auth" in unauth_callbacks
     assert "show_plans" in unauth_callbacks
-    assert "help_info" in unauth_callbacks
+    assert "toggle_script" in unauth_callbacks
     
     # Authenticated dashboard
     kb_auth = kb.main_dashboard_kb(is_authenticated=True, is_running=False, drop_author=False)
     auth_callbacks = [btn.callback_data for row in kb_auth.inline_keyboard for btn in row if btn.callback_data]
-    assert "toggle_state" in auth_callbacks
-    assert "set_source_chat" in auth_callbacks
-    assert "manage_groups" in auth_callbacks
-    assert "adjust_timing" in auth_callbacks
-    assert "adjust_jitter" in auth_callbacks
-    assert "trigger_test" in auth_callbacks
+    assert "radar_menu" in auth_callbacks
+    assert "sender_menu" in auth_callbacks
+    assert "show_plans" in auth_callbacks
     assert "logout_confirm" in auth_callbacks
+    assert "toggle_script" in auth_callbacks
+
+    # Dedicated sender menu
+    kb_sender = kb.sender_menu_kb(is_authenticated=True, is_running=False, drop_author=False)
+    sender_callbacks = [btn.callback_data for row in kb_sender.inline_keyboard for btn in row if btn.callback_data]
+    assert "toggle_state" in sender_callbacks
+    assert "set_source_chat" in sender_callbacks
+    assert "manage_groups" in sender_callbacks
+    assert "adjust_timing" in sender_callbacks
+    assert "adjust_jitter" in sender_callbacks
+    assert "trigger_test" in sender_callbacks
+    assert "back_dashboard" in sender_callbacks
     
     # Pricing plans
     kb_plans = kb.pricing_plans_kb(True)

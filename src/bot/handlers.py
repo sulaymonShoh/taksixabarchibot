@@ -3,7 +3,8 @@ import re
 import asyncio
 import contextlib
 import html
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 from aiogram import Router, F, Bot
@@ -16,6 +17,7 @@ from aiogram.exceptions import TelegramBadRequest
 from src import database as db
 from src.bot import keyboards as kb
 from src.bot import auth_flow
+from src.bot.translit import t
 from src.config import ADMIN_ID, ADMIN_CHANNEL_ID, PAYMENT_CARD_NUMBER, PAYMENT_CARD_HOLDER
 from src.logger import setup_logger
 
@@ -139,22 +141,40 @@ async def safe_answer(call: CallbackQuery, text: str = None, show_alert: bool = 
     with contextlib.suppress(TelegramBadRequest):
         await call.answer(text=text, show_alert=show_alert)
 
-def check_subscription(expiry_str: Optional[str]) -> tuple[str, bool]:
+def get_time_greeting(script: str = "lat") -> str:
+    """Returns dynamic time-of-day greeting for Tashkent timezone (UTC+5)."""
+    tashkent_now = datetime.utcnow() + timedelta(hours=5)
+    hour = tashkent_now.hour
+
+    if 5 <= hour < 12:
+        options = ["Xayrli tong!", "Tongingiz xayrli bo'lsin!"]
+    elif 12 <= hour < 18:
+        options = ["Xayrli kun!", "Kuningiz unumli o'tsin!", "Kuningiz xayrli bo'lsin!"]
+    elif 18 <= hour < 22:
+        options = ["Xayrli oqshom!", "Oqshomingiz xayrli bo'lsin!"]
+    else:
+        options = ["Xayrli tun!", "Tuningiz osuda o'tsin!"]
+
+    return t(random.choice(options), script)
+
+def check_subscription(expiry_str: Optional[str], script: str = "lat") -> tuple[str, bool]:
     if not expiry_str:
-        return "⚠️ Obuna mavjud emas", False
+        return t("⚠️ Obuna mavjud emas", script), False
     try:
         expiry = datetime.strptime(expiry_str, '%Y-%m-%d %H:%M:%S')
         now = datetime.utcnow()
         if expiry > now:
             diff = expiry - now
+            hours = diff.seconds // 3600
             if diff.days > 0:
-                return f"⭐️ VIP ({diff.days} kun {diff.seconds // 3600} soat qoldi)", True
+                res = f"⭐️ {diff.days} kun {hours} soat qoldi"
             else:
-                return f"⭐️ VIP ({diff.seconds // 3600} soat qoldi)", True
+                res = f"⭐️ {hours} soat qoldi"
+            return t(res, script), True
         else:
-            return "🔴 Obuna muddati tugagan", False
+            return t("🔴 Muddati tugagan", script), False
     except Exception:
-        return "⚠️ Noma'lum holat", False
+        return t("⚠️ Noma'lum holat", script), False
 
 async def render_dashboard(message_or_call, user_id: int, state: FSMContext = None):
     if state:
@@ -166,67 +186,123 @@ async def render_dashboard(message_or_call, user_id: int, state: FSMContext = No
         username = getattr(message_or_call.from_user, 'username', None)
         user, _ = await db.get_or_create_user(user_id, full_name, username)
         
+    user_script = await db.get_user_script(user_id)
+    is_auth = auth_flow.is_user_authenticated(user_id)
+    sub_badge, is_sub_active = check_subscription(user.get('subscription_expiry'), script=user_script)
+    
+    greeting = get_time_greeting(user_script)
+    full_name = user.get('full_name') or "Foydalanuvchi"
+    
+    if is_auth:
+        phone = user.get('phone_number') or 'Telegram'
+        auth_status = f"✅ {t('Ulangan', user_script)} (<code>{html.escape(phone)}</code>)"
+    else:
+        auth_status = f"❌ {t('Ulanmagan', user_script)}"
+        
+    user_label = t("Foydalanuvchi", user_script)
+    sub_label = t("Obuna holati", user_script)
+    acc_label = t("Akkaunt holati", user_script)
+
+    text = (
+        f"<b>{html.escape(greeting)}</b>\n\n"
+        f"👤 <b>{html.escape(user_label)}:</b> {html.escape(full_name)} (ID: <code>{user_id}</code>)\n"
+        f"💳 <b>{html.escape(sub_label)}:</b> {sub_badge}\n"
+        f"📱 <b>{html.escape(acc_label)}:</b> {auth_status}"
+    )
+    
+    if not is_auth:
+        tips_title = t("💡 Boshlash uchun:", user_script)
+        step1 = t("1. Quyidagi «📱 Akkauntni ulash» tugmasini bosing.", user_script)
+        step2 = t("2. Telefon raqamingiz va Telegram kodini kiriting.", user_script)
+        step3 = t("3. Buyurtmalar yoki E'lon tarqatish xizmatidan foydalaning!", user_script)
+        text += f"\n\n{tips_title}\n{step1}\n{step2}\n{step3}"
+        
+    markup = kb.main_dashboard_kb(is_authenticated=is_auth, script=user_script)
+    if user_id == ADMIN_ID:
+        markup.inline_keyboard.insert(0, [
+            InlineKeyboardButton(text=t("👑 SuperAdmin Panelga qaytish", user_script), callback_data="admin_panel")
+        ])
+    
+    if isinstance(message_or_call, Message):
+        await message_or_call.answer(text, reply_markup=markup, parse_mode="HTML")
+    else:
+        with contextlib.suppress(TelegramBadRequest):
+            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
+async def render_sender_menu(message_or_call, user_id: int):
+    user = await db.get_user(user_id)
+    if not user:
+        full_name = getattr(message_or_call.from_user, 'full_name', 'Foydalanuvchi')
+        username = getattr(message_or_call.from_user, 'username', None)
+        user, _ = await db.get_or_create_user(user_id, full_name, username)
+
+    user_script = await db.get_user_script(user_id)
     settings = await db.get_user_settings(user_id)
     is_auth = auth_flow.is_user_authenticated(user_id)
-    sub_badge, is_sub_active = check_subscription(user.get('subscription_expiry'))
-    
+    sub_badge, is_sub_active = check_subscription(user.get('subscription_expiry'), script=user_script)
+
     is_running = settings.get('is_running', False)
     source_chat_id = settings.get('source_chat_id')
-    source_chat_title = settings.get('source_chat_title') or "O'rnatilmagan"
+    source_chat_title = settings.get('source_chat_title') or t("O'rnatilmagan", user_script)
     drop_author = settings.get('drop_author', False)
-    
+
     cycle_min = settings.get('cycle_min', 60)
     cycle_max = settings.get('cycle_max', 90)
     jitter_min = settings.get('jitter_min', 1.5)
     jitter_max = settings.get('jitter_max', 2.0)
-    
+
     groups = await db.get_user_groups(user_id)
     active_groups = len([g for g in groups if g.get('is_active')])
     total_groups = len(groups)
-    
-    auth_status = f"✅ Ulangan (`{user.get('phone_number') or 'Telegram'}`)" if is_auth else "❌ Ulanmagan"
-    source_display = f"📢 **{source_chat_title}**" if source_chat_id else "⚠️ **O'rnatilmagan**"
-    forward_mode_text = "Toza post (Muallifsiz)" if drop_author else "Asl nusxa (Forwarded)"
-    
+
+    forward_mode_text = t("Toza post (Muallifsiz)", user_script) if drop_author else t("Asl nusxa (Forwarded)", user_script)
+
     est_seconds = active_groups * ((float(jitter_min) + float(jitter_max)) / 2)
     est_minutes = est_seconds / 60
-    
-    status_icon = '🟢 FAOL (Ishlayapti)' if is_running else '🔴 TO\'XTATILGAN (Pauza)'
+
     if not is_sub_active:
-        status_icon = '🔴 OBUNA MUDDATI TUGAGAN'
-        
+        status_icon = t("🔴 Obuna muddati tugagan", user_script)
+    elif is_running:
+        status_icon = t("🟢 FAOL (Ishlayapti)", user_script)
+    else:
+        status_icon = t("🔴 TO'XTATILGAN (Pauza)", user_script)
+
+    source_display = f"📢 <b>{html.escape(source_chat_title)}</b>" if source_chat_id else f"⚠️ <b>{t('O\'rnatilmagan', user_script)}</b>"
+
+    header_title = t("📢 E'lon tarqatish sozlamalari", user_script)
+    status_lbl = t("Holat:", user_script)
+    source_lbl = t("Manba guruh:", user_script)
+    forward_lbl = t("Forward rejimi:", user_script)
+    groups_lbl = t("Guruhlar:", user_script)
+    cycle_lbl = t("Doira oralig'i:", user_script)
+    jitter_lbl = t("Yuborish tezligi:", user_script)
+    ta_faol = t("ta Faol", user_script)
+    ta_jami = t("ta Jami", user_script)
+    daqiqada = t("daqiqada", user_script)
+    ta_guruh = t("ta guruh", user_script)
+
     text = (
-        "🚕 **Taksi Xabarchi — Avtomatik E'lon Tarqatish Tizimi**\n\n"
-        f"👤 **Foydalanuvchi:** {user.get('full_name')} (ID: `{user_id}`)\n"
-        f"💎 **Obuna holati:** {sub_badge}\n"
-        f"📱 **Akkaunt holati:** {auth_status}\n\n"
-        f"**Holat:** {status_icon}\n"
-        f"**📥 Manba guruh:** {source_display}\n"
-        f"**🔄 Forward rejimi:** {forward_mode_text}\n"
-        f"**👥 Guruhlar:** {active_groups} ta Faol / {total_groups} ta Jami\n"
-        f"**⏱ Doira oralig'i:** {cycle_min}s - {cycle_max}s\n"
-        f"**⚡️ Yuborish tezligi:** {jitter_min}s - {jitter_max}s (~{est_minutes:.1f} daqiqada {active_groups} ta guruh)\n"
+        f"<b>{header_title}</b>\n\n"
+        f"<b>{status_lbl}</b> {status_icon}\n"
+        f"📥 <b>{source_lbl}</b> {source_display}\n"
+        f"🔄 <b>{forward_lbl}</b> {forward_mode_text}\n"
+        f"👥 <b>{groups_lbl}</b> {active_groups} {ta_faol} / {total_groups} {ta_jami}\n"
+        f"⏱ <b>{cycle_lbl}</b> {cycle_min}s - {cycle_max}s\n"
+        f"⚡️ <b>{jitter_lbl}</b> {jitter_min}s - {jitter_max}s (~{est_minutes:.1f} {daqiqada} {active_groups} {ta_guruh})\n"
     )
-    
-    if not is_auth:
-        text += (
-            "\n💡 **Boshlash uchun:**\n"
-            "1. Quyidagi **«📱 Telegram akkauntni ulash»** tugmasini bosing.\n"
-            "2. Telefon raqamingiz va Telegram kodini kiriting.\n"
-            "3. Manba guruhingizni sozlab, e'lon tarqatishni boshlang!"
-        )
-        
-    markup = kb.main_dashboard_kb(is_authenticated=is_auth, is_running=is_running, drop_author=drop_author)
-    if user_id == ADMIN_ID:
-        markup.inline_keyboard.insert(0, [
-            InlineKeyboardButton(text="👑 SuperAdmin Panelga qaytish", callback_data="admin_panel")
-        ])
-    
+
+    markup = kb.sender_menu_kb(
+        is_authenticated=is_auth,
+        is_running=is_running,
+        drop_author=drop_author,
+        script=user_script
+    )
+
     if isinstance(message_or_call, Message):
-        await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
+        await message_or_call.answer(text, reply_markup=markup, parse_mode="HTML")
     else:
         with contextlib.suppress(TelegramBadRequest):
-            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
 async def render_admin_dashboard(message_or_call, state: FSMContext = None):
     if state:
@@ -296,7 +372,7 @@ async def render_admin_dashboard(message_or_call, state: FSMContext = None):
 @router.message(Command("admin"))
 async def start_cmd(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    if user_id == ADMIN_ID:
+    if user_id == ADMIN_ID and message.text and "/admin" in message.text:
         await render_admin_dashboard(message, state)
         return
 
@@ -306,13 +382,19 @@ async def start_cmd(message: Message, state: FSMContext):
         username=message.from_user.username
     )
     
+    user_script = await db.get_user_script(user_id)
+    is_auth = auth_flow.is_user_authenticated(user_id)
+    reply_markup = kb.main_reply_kb(user_script) if is_auth else kb.unauth_reply_kb(user_script)
+
     if is_new:
         welcome_text = (
-            f"👋 **Assalomu alaykum, {message.from_user.full_name}!**\n\n"
-            "🎉 Sizga **3 kunlik BEPUL VIP sinov muddati** taqdim etildi!\n"
-            "Endi o'z Telegram akkauntingizni ulab, 50+ guruhlarga avtomatik e'lon tarqatishingiz mumkin."
+            f"👋 <b>{t('Assalomu alaykum', user_script)}, {html.escape(message.from_user.full_name)}!</b>\n\n"
+            f"🎉 {t('Sizga 3 kunlik BEPUL VIP sinov muddati taqdim etildi!', user_script)}\n"
+            f"{t('Endi buyurtmalarni kuzatishingiz va guruhlarga avtomatik e\'lon tarqatishingiz mumkin.', user_script)}"
         )
-        await message.answer(welcome_text, parse_mode="Markdown")
+        await message.answer(welcome_text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await message.answer(f"🚕 <b>{t('Taksi Xabarchi', user_script)}</b>", reply_markup=reply_markup, parse_mode="HTML")
         
     await render_dashboard(message, user_id, state)
 
@@ -339,45 +421,115 @@ async def back_dashboard_call(call: CallbackQuery, state: FSMContext):
         await render_dashboard(call, call.from_user.id, state)
     await safe_answer(call)
 
+@router.callback_query(F.data == "sender_menu")
+async def sender_menu_call(call: CallbackQuery):
+    await render_sender_menu(call, call.from_user.id)
+    await safe_answer(call)
+
+@router.callback_query(F.data == "toggle_script")
+async def toggle_script_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    current_script = await db.get_user_script(user_id)
+    new_script = "cyr" if current_script == "lat" else "lat"
+    await db.set_user_script(user_id, new_script)
+    
+    is_auth = auth_flow.is_user_authenticated(user_id)
+    reply_markup = kb.main_reply_kb(new_script) if is_auth else kb.unauth_reply_kb(new_script)
+    
+    alert_txt = "Алифбо: Кирилл танланди 🇺🇿" if new_script == "cyr" else "Alifbo: Lotin tanlandi 🇺🇿"
+    await safe_answer(call, alert_txt)
+    await render_dashboard(call, user_id)
+    with contextlib.suppress(Exception):
+        await call.bot.send_message(
+            chat_id=user_id,
+            text=f"🌐 {alert_txt}",
+            reply_markup=reply_markup
+        )
+
 @router.callback_query(F.data == "help_info")
 async def help_info_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
     text = (
-        "📖 **Taksi Xabarchi Bot Qo'llanmasi**\n\n"
-        "1. **Akkaunt ulash:** «📱 Telegram akkauntni ulash» tugmasi orqali shaxsiy akkauntingizni ulang.\n"
-        "2. **Manba guruh:** E'lonlaringizni yozib boradigan shaxsiy guruh/kanalingizdan biron bir xabarni botga uzating (Forward qiling).\n"
-        "3. **Guruhlar:** E'lon tarqatiladigan guruhlardan xabarlarni botga uzating yoki akkauntingiz a'zo bo'lgan guruhlarni yuklang.\n"
-        "4. **Boshlash:** «▶️ Boshlash» tugmasini bossangiz, bot belgilangan tezlikda muntazam e'lonlaringizni tarqatib turadi."
+        f"📖 <b>{t('Taksi Xabarchi Bot Qo\'llanmasi', user_script)}</b>\n\n"
+        f"🎯 <b>1. {t('Buyurtmalar radari:', user_script)}</b>\n"
+        f"{t('Haydovchilar uchun guruhlardagi toza yo\'lovchi va pochta xabarlarini avtomatik ajratib, tezkor bildirishnoma yuboradi. «Buyurtmalar» bo\'limida yo\'nalish va tumanlarni sozlashingiz mumkin.', user_script)}\n\n"
+        f"📢 <b>2. {t('E\'lon tarqatish:', user_script)}</b>\n"
+        f"{t('Shaxsiy akkauntingizni ulab, 50+ guruhlarga xabarlaringizni avtomatik va muntazam interval bilan tarqatasiz.', user_script)}\n\n"
+        f"💳 <b>3. {t('Obuna tizimi:', user_script)}</b>\n"
+        f"{t('Xizmatlardan to\'liq foydalanish uchun obunani o\'z vaqtida faollashtiring yoki uzaytiring.', user_script)}"
     )
     with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text(text, reply_markup=kb.back_kb(), parse_mode="Markdown")
+        await call.message.edit_text(text, reply_markup=kb.back_kb(user_script), parse_mode="HTML")
     await safe_answer(call)
+
+@router.message(F.text.in_({"📖 Foydalanish qo'llanmasi", "📖 Фойдаланиш қўлланмаси"}))
+async def guide_reply_handler(message: Message):
+    user_id = message.from_user.id
+    user_script = await db.get_user_script(user_id)
+    guide_text = (
+        f"📖 <b>{t('Taksi Xabarchi Bot Qo\'llanmasi', user_script)}</b>\n\n"
+        f"🎯 <b>1. {t('Buyurtmalar radari:', user_script)}</b>\n"
+        f"{t('Haydovchilar uchun guruhlardagi toza yo\'lovchi va pochta xabarlarini avtomatik ajratib, tezkor bildirishnoma yuboradi. «Buyurtmalar» bo\'limida yo\'nalish va tumanlarni sozlashingiz mumkin.', user_script)}\n\n"
+        f"📢 <b>2. {t('E\'lon tarqatish:', user_script)}</b>\n"
+        f"{t('Shaxsiy akkauntingizni ulab, 50+ guruhlarga xabarlaringizni avtomatik va muntazam interval bilan tarqatasiz.', user_script)}\n\n"
+        f"💳 <b>3. {t('Obuna tizimi:', user_script)}</b>\n"
+        f"{t('Xizmatlardan to\'liq foydalanish uchun obunani o\'z vaqtida faollashtiring yoki uzaytiring.', user_script)}"
+    )
+    await message.answer(guide_text, parse_mode="HTML")
+
+@router.message(F.text.in_({"✍️ Adminga yozish", "✍️ Админга ёзиш"}))
+async def admin_support_reply_handler(message: Message):
+    user_id = message.from_user.id
+    user_script = await db.get_user_script(user_id)
+    support_text = (
+        f"✍️ <b>{t('Qo\'llab-quvvatlash xizmati', user_script)}</b>\n\n"
+        f"{t('Savol, taklif yoki to\'lovlar bo\'yicha murojaat qilish uchun adminga yozishingiz mumkin:', user_script)}\n\n"
+        f"👤 <b>{t('Admin:', user_script)}</b> @sulaymonshoh\n"
+        f"💬 <b>{t('Aloqa:', user_script)}</b> <a href=\"tg://user?id={ADMIN_ID}\">{t('Admin bilan bog\'lanish', user_script)}</a>"
+    )
+    await message.answer(support_text, parse_mode="HTML")
+
+@router.message(F.text.in_({"❌ Bekor qilish", "❌ Бекор қилиш"}))
+async def cancel_reply_handler(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    user_script = await db.get_user_script(user_id)
+    await auth_flow.cancel_auth_session(user_id)
+    await state.clear()
+    is_auth = auth_flow.is_user_authenticated(user_id)
+    reply_markup = kb.main_reply_kb(user_script) if is_auth else kb.unauth_reply_kb(user_script)
+    await message.answer(t("Amal bekor qilindi.", user_script), reply_markup=reply_markup)
+    await render_dashboard(message, user_id, state)
 
 # ==================== IN-CHAT AUTHENTICATION FLOW ====================
 @router.callback_query(F.data == "start_auth")
 async def start_auth_call(call: CallbackQuery, state: FSMContext):
     user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
     if auth_flow.is_user_authenticated(user_id):
-        await safe_answer(call, "Sizning akkauntingiz allaqachon ulangan!", show_alert=True)
+        await safe_answer(call, t("Sizning akkauntingiz allaqachon ulangan!", user_script), show_alert=True)
         await render_dashboard(call, user_id, state)
         return
         
     text = (
-        "📱 **Telegram Akkauntni Ulash**\n\n"
-        "Guruhlarga e'lon tarqatish uchun Telegram akkauntingizni ulash lozim.\n\n"
-        "👇 Pastdagi **«📱 Telefon raqamni yuborish»** tugmasini bosing yoki telefon raqamingizni xalqaro formatda yozib yuboring (Masalan: `+998901234567`):"
+        f"📱 <b>{t('Telegram Akkauntni Ulash', user_script)}</b>\n\n"
+        f"{t('Guruhlarga e\'lon tarqatish uchun Telegram akkauntingizni ulash lozim.', user_script)}\n\n"
+        f"👇 {t('Pastdagi «📱 Telefon raqamni yuborish» tugmasini bosing yoki telefon raqamingizni xalqaro formatda yozib yuboring (Masalan: +998901234567):', user_script)}"
     )
     await state.set_state(AuthStates.waiting_for_phone)
-    await call.message.answer(text, reply_markup=kb.phone_request_kb(), parse_mode="Markdown")
+    await call.message.answer(text, reply_markup=kb.phone_request_kb(user_script), parse_mode="HTML")
     await safe_answer(call)
 
 @router.message(AuthStates.waiting_for_phone, F.contact)
 @router.message(AuthStates.waiting_for_phone, F.text)
 async def process_phone_input(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    user_script = await db.get_user_script(user_id)
     
-    if message.text == "❌ Bekor qilish":
+    if message.text in ("❌ Bekor qilish", "❌ Бекор қилиш"):
         await state.clear()
-        await message.answer("Ulanish bekor qilindi.", reply_markup=ReplyKeyboardRemove())
+        reply_markup = kb.unauth_reply_kb(user_script)
+        await message.answer(t("Ulanish bekor qilindi.", user_script), reply_markup=reply_markup)
         await render_dashboard(message, user_id, state)
         return
         
@@ -387,10 +539,10 @@ async def process_phone_input(message: Message, state: FSMContext):
         clean_phone = f"+{clean_phone}"
         
     if len(clean_phone) < 9:
-        await message.answer("⚠️ Telefon raqami noto'g'ri kiritildi. Iltimos, qaytadan yuboring (Masalan: `+998901234567`).", parse_mode="Markdown")
+        await message.answer(t("⚠️ Telefon raqami noto'g'ri kiritildi. Iltimos, qaytadan yuboring (Masalan: `+998901234567`).", user_script), parse_mode="Markdown")
         return
         
-    status_msg = await message.answer("⏳ Telegram serveriga ulanmoqda va tasdiqlash kodi so'ralmoqda...", reply_markup=ReplyKeyboardRemove())
+    status_msg = await message.answer(t("⏳ Telegram serveriga ulanmoqda va tasdiqlash kodi so'ralmoqda...", user_script))
     
     res = await auth_flow.start_phone_login(user_id, clean_phone)
     with contextlib.suppress(Exception):
@@ -406,12 +558,12 @@ async def process_phone_input(message: Message, state: FSMContext):
         
     await state.set_state(AuthStates.waiting_for_code)
     code_prompt = (
-        f"📩 **Tasdiqlash kodi yuborildi!**\n\n"
-        f"Telefon raqamingiz (`{clean_phone}`) ga Telegram ilovasi orqali 5 xonali tasdiqlash kodi yuborildi.\n\n"
-        "👉 **Kodni probellar bilan ajratib yozib yuboring:**\n"
-        "Masalan: `1 2 3 4 5`"
+        f"📩 <b>{t('Tasdiqlash kodi yuborildi!', user_script)}</b>\n\n"
+        f"{t('Telefon raqamingiz', user_script)} (<code>{clean_phone}</code>) {t('ga Telegram ilovasi orqali 5 xonali tasdiqlash kodi yuborildi.', user_script)}\n\n"
+        f"👉 <b>{t('Kodni probellar bilan ajratib yozib yuboring:', user_script)}</b>\n"
+        f"{t('Masalan:', user_script)} <code>1 2 3 4 5</code>"
     )
-    await message.answer(code_prompt, reply_markup=kb.cancel_auth_kb(), parse_mode="Markdown")
+    await message.answer(code_prompt, reply_markup=kb.cancel_auth_kb(), parse_mode="HTML")
 
 @router.message(AuthStates.waiting_for_code, F.text)
 async def process_code_input(message: Message, state: FSMContext, bot: Bot):
@@ -450,7 +602,10 @@ async def process_code_input(message: Message, state: FSMContext, bot: Bot):
         if worker_mgr:
             await worker_mgr.start_user_worker(user_id)
         
-    await status_msg.edit_text("🎉 **Tabriklaymiz! Telegram akkauntingiz muvaffaqiyatli ulandi!**")
+    user_script = await db.get_user_script(user_id)
+    await status_msg.edit_text(f"🎉 <b>{t('Tabriklaymiz! Telegram akkauntingiz muvaffaqiyatli ulandi!', user_script)}</b>", parse_mode="HTML")
+    with contextlib.suppress(Exception):
+        await message.answer(f"✅ {t('Akkaunt ulandi.', user_script)}", reply_markup=kb.main_reply_kb(user_script))
     await render_dashboard(message, user_id, state)
 
 @router.message(AuthStates.waiting_for_2fa, F.text)
@@ -476,28 +631,34 @@ async def process_2fa_input(message: Message, state: FSMContext, bot: Bot):
         if worker_mgr:
             await worker_mgr.start_user_worker(user_id)
         
-    await status_msg.edit_text("🎉 **Tabriklaymiz! Akkauntingiz muvaffaqiyatli ulandi!**")
+    user_script = await db.get_user_script(user_id)
+    await status_msg.edit_text(f"🎉 <b>{t('Tabriklaymiz! Akkauntingiz muvaffaqiyatli ulandi!', user_script)}</b>", parse_mode="HTML")
+    with contextlib.suppress(Exception):
+        await message.answer(f"✅ {t('Akkaunt ulandi.', user_script)}", reply_markup=kb.main_reply_kb(user_script))
     await render_dashboard(message, user_id, state)
 
 @router.callback_query(F.data == "cancel_auth")
 async def cancel_auth_call(call: CallbackQuery, state: FSMContext):
     user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
     await auth_flow.cancel_auth_session(user_id)
     await state.clear()
     with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text("Akkaunt ulash bekor qilindi.")
+        await call.message.edit_text(t("Akkaunt ulash bekor qilindi.", user_script))
     await render_dashboard(call, user_id, state)
     await safe_answer(call)
 
 # ==================== LOGOUT FLOW ====================
 @router.callback_query(F.data == "logout_confirm")
 async def logout_confirm_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
     text = (
-        "⚠️ **Haqiqatdan ham akkauntni uzmoqchimisiz?**\n\n"
-        "Akkaunt uzilgach, barcha avtomatik e'lon tarqatish to'xtatiladi va tizimdagi sessiyangiz o'chiriladi."
+        f"⚠️ <b>{t('Haqiqatdan ham akkauntni uzmoqchimisiz?', user_script)}</b>\n\n"
+        f"{t('Akkaunt uzilgach, barcha avtomatik e\'lon tarqatish to\'xtatiladi va tizimdagi sessiyangiz o\'chiriladi.', user_script)}"
     )
     with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text(text, reply_markup=kb.logout_confirm_kb(), parse_mode="Markdown")
+        await call.message.edit_text(text, reply_markup=kb.logout_confirm_kb(), parse_mode="HTML")
     await safe_answer(call)
 
 @router.callback_query(F.data == "logout_confirmed")
@@ -516,8 +677,15 @@ async def logout_confirmed_call(call: CallbackQuery, bot: Bot, state: FSMContext
     await db.set_user_setting(user_id, "is_running", 0)
     await db.update_user_phone(user_id, "")
     
+    user_script = await db.get_user_script(user_id)
     with contextlib.suppress(TelegramBadRequest):
-        await call.message.edit_text("🔌 **Akkauntingiz tizimdan muvaffaqiyatli uzildi.**", parse_mode="Markdown")
+        await call.message.edit_text(f"🔌 <b>{t('Akkauntingiz tizimdan muvaffaqiyatli uzildi.', user_script)}</b>", parse_mode="HTML")
+    with contextlib.suppress(Exception):
+        await call.bot.send_message(
+            chat_id=user_id,
+            text=f"🔌 {t('Akkaunt uzildi.', user_script)}",
+            reply_markup=kb.unauth_reply_kb(user_script)
+        )
         
     await render_dashboard(call, user_id, state)
     await safe_answer(call)
@@ -763,14 +931,15 @@ async def admin_reject_payment_call(call: CallbackQuery, bot: Bot):
 async def toggle_state_call(call: CallbackQuery, bot: Bot):
     user_id = call.from_user.id
     user = await db.get_user(user_id)
-    _, is_sub_active = check_subscription(user.get('subscription_expiry') if user else None)
+    user_script = await db.get_user_script(user_id)
+    _, is_sub_active = check_subscription(user.get('subscription_expiry') if user else None, script=user_script)
     
     if not is_sub_active:
-        await safe_answer(call, "Obuna muddatingiz tugagan! Iltimos, obunani uzaytiring.", show_alert=True)
+        await safe_answer(call, t("Obuna muddatingiz tugagan! Iltimos, obunani uzaytiring.", user_script), show_alert=True)
         return
         
     if not auth_flow.is_user_authenticated(user_id):
-        await safe_answer(call, "Avval Telegram akkauntingizni ulang!", show_alert=True)
+        await safe_answer(call, t("Avval Telegram akkauntingizni ulang!", user_script), show_alert=True)
         return
         
     settings = await db.get_user_settings(user_id)
@@ -778,7 +947,7 @@ async def toggle_state_call(call: CallbackQuery, bot: Bot):
     source_chat_id = settings.get('source_chat_id')
     
     if not is_running and not source_chat_id:
-        await safe_answer(call, "Avval 'Manba guruhni sozlash' orqali xabar olinadigan guruhni ulang!", show_alert=True)
+        await safe_answer(call, t("Avval 'Manba guruhni sozlash' orqali xabar olinadigan guruhni ulang!", user_script), show_alert=True)
         return
         
     new_state = 0 if is_running else 1
@@ -791,17 +960,18 @@ async def toggle_state_call(call: CallbackQuery, bot: Bot):
         else:
             await worker_mgr.stop_user_worker(user_id)
             
-    await render_dashboard(call, user_id)
-    await safe_answer(call, "Holat o'zgartirildi!")
+    await render_sender_menu(call, user_id)
+    await safe_answer(call, t("Holat o'zgartirildi!", user_script))
 
 @router.callback_query(F.data == "toggle_drop_author")
 async def toggle_drop_author_call(call: CallbackQuery):
     user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
     settings = await db.get_user_settings(user_id)
     drop_author = settings.get('drop_author', False)
     await db.set_user_setting(user_id, "drop_author", 0 if drop_author else 1)
-    await render_dashboard(call, user_id)
-    await safe_answer(call, "Forward rejimi o'zgartirildi!")
+    await render_sender_menu(call, user_id)
+    await safe_answer(call, t("Forward rejimi o'zgartirildi!", user_script))
 
 # ==================== SOURCE CHAT SETUP ====================
 @router.message(Command("source"))
@@ -1888,7 +2058,8 @@ async def admin_new_promo_info_call(call: CallbackQuery):
 
 async def render_radar_menu(message_or_call, user_id: int):
     user = await db.get_user(user_id)
-    sub_badge, is_vip = check_subscription(user.get("subscription_expiry") if user else None)
+    user_script = await db.get_user_script(user_id)
+    sub_badge, is_vip = check_subscription(user.get("subscription_expiry") if user else None, script=user_script)
     prefs = await db.get_driver_radar_preferences(user_id)
 
     is_active = bool(prefs.get("is_radar_active", True))
@@ -1905,43 +2076,53 @@ async def render_radar_menu(message_or_call, user_id: int):
         "toshkent_to_andijon": "Toshkent ➡️ Andijon",
         "andijon_to_toshkent": "Andijon ➡️ Toshkent"
     }
-    dir_str = dir_names.get(direction, "Toshkent ⇄ Andijon")
+    dir_str = t(dir_names.get(direction, "Toshkent ⇄ Andijon"), user_script)
 
     types_list = []
     if allow_passenger:
-        types_list.append("Yo'lovchi (✅)")
+        types_list.append(t("Yo'lovchi (✅)", user_script))
     if allow_cargo:
-        types_list.append("Pochta/Yuk (✅)")
+        types_list.append(t("Pochta/Yuk (✅)", user_script))
     if not types_list:
-        types_list.append("Tanlanmagan (❌)")
+        types_list.append(t("Tanlanmagan (❌)", user_script))
     types_str = " | ".join(types_list)
 
     district_dict = dict(kb.ANDIJON_RADAR_DISTRICTS)
-    district_names = [district_dict.get(d, d) for d in selected_districts]
+    district_names = [t(district_dict.get(d, d), user_script) for d in selected_districts]
     if district_names:
         dist_str = ", ".join(district_names[:6])
         if len(district_names) > 6:
-            dist_str += f" va yana {len(district_names) - 6} ta"
+            dist_str += f" {t('va yana', user_script)} {len(district_names) - 6} {t('ta', user_script)}"
     else:
-        dist_str = "Barcha tumanlar (Filtrsizz)"
+        dist_str = t("Barcha tumanlar (Filtrsiz)", user_script)
 
-    status_badge = "🟢 YONIQ (Aktiv)" if is_active else "🔴 TO'XTATILGAN (Pauza)"
-    sound_badge = "🔔 Ovozli" if sound_alerts else "🔕 Tovushsiz"
+    status_badge = t("🟢 YONIQ (Aktiv)", user_script) if is_active else t("🔴 TO'XTATILGAN (Pauza)", user_script)
+    sound_badge = t("🔔 Ovozli", user_script) if sound_alerts else t("🔕 Tovushsiz", user_script)
+
+    header = t("🎯 BUYURTMALAR", user_script)
+    subhead = t("Guruhlardagi saralangan toza mijoz va pochta buyurtmalarini soniyada tutib beradi.", user_script)
+    sub_lbl = t("Obuna holati:", user_script)
+    radar_lbl = t("Radar:", user_script)
+    dir_lbl = t("Yo'nalish:", user_script)
+    order_type_lbl = t("Buyurtma turi:", user_script)
+    notif_lbl = t("Bildirishnoma:", user_script)
+    dist_lbl = t(f"Tanlangan tumanlar ({len(selected_districts)} ta):", user_script)
+    tip = t("Avtomatlashtirilgan tranzit yo'lak algoritmi siz tanlagan tumanlar va ularga tutash qo'shni tumanlardagi buyurtmalarni sizga yetkazadi!", user_script)
 
     text = (
-        "🎯 <b>BUYURTMALAR RADARI (v3.0)</b>\n"
-        "<i>Guruhlardagi saralangan toza mijoz va pochta buyurtmalarini soniyada tutib beradi.</i>\n\n"
-        f"⭐️ <b>Obuna holati:</b> {sub_badge}\n"
-        f"📡 <b>Radar:</b> {status_badge}\n"
-        f"🔀 <b>Yo'nalish:</b> {dir_str}\n"
-        f"📦 <b>Buyurtma turi:</b> {types_str}\n"
-        f"🔔 <b>Bildirishnoma:</b> {sound_badge}\n\n"
-        f"📍 <b>Tanlangan tumanlar ({len(selected_districts)} ta):</b>\n"
+        f"🎯 <b>{header}</b>\n"
+        f"<i>{subhead}</i>\n\n"
+        f"⭐️ <b>{sub_lbl}</b> {sub_badge}\n"
+        f"📡 <b>{radar_lbl}</b> {status_badge}\n"
+        f"🔀 <b>{dir_lbl}</b> {dir_str}\n"
+        f"📦 <b>{order_type_lbl}</b> {types_str}\n"
+        f"🔔 <b>{notif_lbl}</b> {sound_badge}\n\n"
+        f"📍 <b>{dist_lbl}</b>\n"
         f"• <i>{dist_str}</i>\n\n"
-        "💡 <i>Avtomatlashtirilgan tranzit yo'lak algoritmi siz tanlagan tumanlar va ularga tutash qo'shni tumanlardagi buyurtmalarni sizga yetkazadi!</i>"
+        f"💡 <i>{tip}</i>"
     )
 
-    markup = kb.radar_menu_kb(prefs, is_vip)
+    markup = kb.radar_menu_kb(prefs, is_vip, script=user_script)
 
     if isinstance(message_or_call, Message):
         await message_or_call.answer(text, reply_markup=markup, parse_mode="HTML")
@@ -1950,18 +2131,24 @@ async def render_radar_menu(message_or_call, user_id: int):
             await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
 async def render_radar_districts(call: CallbackQuery, user_id: int):
+    user_script = await db.get_user_script(user_id)
     prefs = await db.get_driver_radar_preferences(user_id)
     districts = prefs.get("selected_districts", [])
     if not isinstance(districts, list):
         districts = []
 
+    header = t("📍 RADAR TUMANLAR FILTRI", user_script)
+    desc1 = t("Qaysi tumanlardan yo'lovchi yoki pochta olmoqchi bo'lsangiz, ularni belgilang.", user_script)
+    desc2 = t("Tizim tanlangan tumanlar va ularning tranzit yo'lagidagi buyurtmalarni filtrlash uchun xizmat qiladi.", user_script)
+    sel_info = t(f"Hozirda tanlangan: {len(districts)} ta tuman", user_script)
+
     text = (
-        "📍 <b>RADAR TUMANLAR FILTRI</b>\n\n"
-        "Qaysi tumanlardan yo'lovchi yoki pochta olmoqchi bo'lsangiz, ularni belgilang.\n"
-        "<i>Tizim tanlangan tumanlar va ularning tranzit yo'lagidagi buyurtmalarni filtrlash uchun xizmat qiladi.</i>\n\n"
-        f"Hozirda tanlangan: <b>{len(districts)} ta tuman</b>"
+        f"<b>{header}</b>\n\n"
+        f"{desc1}\n"
+        f"<i>{desc2}</i>\n\n"
+        f"<b>{sel_info}</b>"
     )
-    markup = kb.radar_districts_kb(districts)
+    markup = kb.radar_districts_kb(districts, script=user_script)
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
@@ -1979,11 +2166,12 @@ async def radar_menu_call(call: CallbackQuery):
 @router.callback_query(F.data == "radar_toggle_state")
 async def radar_toggle_state_call(call: CallbackQuery):
     user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
     prefs = await db.get_driver_radar_preferences(user_id)
     new_state = 0 if prefs.get("is_radar_active", 1) else 1
     await db.update_driver_radar_preferences(user_id, is_radar_active=new_state)
     await render_radar_menu(call, user_id)
-    status_msg = "🟢 Radar faollashtirildi!" if new_state else "🔴 Radar to'xtatildi (pauza)!"
+    status_msg = t("🟢 Radar faollashtirildi!", user_script) if new_state else t("🔴 Radar to'xtatildi (pauza)!", user_script)
     await safe_answer(call, status_msg)
 
 @router.callback_query(F.data == "radar_toggle_dir")
@@ -2022,11 +2210,12 @@ async def radar_toggle_cargo_call(call: CallbackQuery):
 @router.callback_query(F.data == "radar_toggle_sound")
 async def radar_toggle_sound_call(call: CallbackQuery):
     user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
     prefs = await db.get_driver_radar_preferences(user_id)
     new_val = 0 if prefs.get("sound_alerts", 1) else 1
     await db.update_driver_radar_preferences(user_id, sound_alerts=new_val)
     await render_radar_menu(call, user_id)
-    msg = "🔔 Ovozli bildirishnomalar yoqildi" if new_val else "🔕 Bildirishnomalar tovushsiz rejimga o'tkazildi"
+    msg = t("🔔 Ovozli bildirishnomalar yoqildi", user_script) if new_val else t("🔕 Bildirishnomalar tovushsiz rejimga o'tkazildi", user_script)
     await safe_answer(call, msg)
 
 @router.callback_query(F.data == "radar_districts")
@@ -2045,17 +2234,19 @@ async def radar_toggle_district_call(call: CallbackQuery):
 @router.callback_query(F.data == "radar_districts_all")
 async def radar_districts_all_call(call: CallbackQuery):
     user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
     all_districts = [d[0] for d in kb.ANDIJON_RADAR_DISTRICTS]
     await db.update_driver_radar_preferences(user_id, selected_districts=all_districts)
     await render_radar_districts(call, user_id)
-    await safe_answer(call, "✅ Barcha tumanlar tanlandi")
+    await safe_answer(call, t("✅ Barcha tumanlar tanlandi", user_script))
 
 @router.callback_query(F.data == "radar_districts_clear")
 async def radar_districts_clear_call(call: CallbackQuery):
     user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
     await db.update_driver_radar_preferences(user_id, selected_districts=[])
     await render_radar_districts(call, user_id)
-    await safe_answer(call, "⬜️ Tumanlar filtri tozalandi")
+    await safe_answer(call, t("⬜️ Tumanlar filtri tozalandi", user_script))
 
 # ==================== V3 ORDER CLAIM HANDLER (STAGE 4) ====================
 

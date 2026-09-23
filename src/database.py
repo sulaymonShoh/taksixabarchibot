@@ -25,6 +25,7 @@ async def init_db():
                 subscription_expiry TIMESTAMP,
                 is_lifetime_discount BOOLEAN DEFAULT 1,
                 is_banned BOOLEAN DEFAULT 0,
+                script TEXT DEFAULT 'lat',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -85,6 +86,11 @@ async def init_db():
                 await db.execute('ALTER TABLE payment_requests ADD COLUMN discount_details TEXT')
             if 'promocode' not in cols:
                 await db.execute('ALTER TABLE payment_requests ADD COLUMN promocode TEXT')
+
+        async with db.execute("PRAGMA table_info(users)") as cursor:
+            user_cols = [r[1] for r in await cursor.fetchall()]
+            if 'script' not in user_cols:
+                await db.execute("ALTER TABLE users ADD COLUMN script TEXT DEFAULT 'lat'")
         
         # Global platform settings
         await db.execute('''
@@ -255,6 +261,21 @@ async def get_all_users() -> List[Dict[str, Any]]:
         async with db.execute('SELECT * FROM users ORDER BY created_at DESC') as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+async def get_user_script(user_id: int) -> str:
+    """Returns preferred script ('lat' or 'cyr') for the user."""
+    user = await get_user(user_id)
+    if user and user.get("script"):
+        return user["script"]
+    return "lat"
+
+async def set_user_script(user_id: int, script: str) -> bool:
+    """Updates preferred script ('lat' or 'cyr') for the user."""
+    clean_script = "cyr" if script == "cyr" else "lat"
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE users SET script = ? WHERE user_id = ?', (clean_script, user_id))
+        await db.commit()
+    return True
 
 async def update_user_phone(user_id: int, phone_number: str):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1084,7 +1105,7 @@ async def get_active_radar_drivers() -> List[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         sql = '''
-            SELECT p.*, u.full_name, u.username, u.phone_number, u.subscription_expiry, u.is_banned
+            SELECT p.*, u.full_name, u.username, u.phone_number, u.subscription_expiry, u.is_banned, u.script
             FROM driver_radar_preferences p
             JOIN users u ON p.user_id = u.user_id
             WHERE p.is_radar_active = 1 AND (u.is_banned IS NULL OR u.is_banned = 0)

@@ -50,19 +50,22 @@ def build_order_action_keyboard(
     order_id: int,
     username: Optional[str] = None,
     is_vip: bool = True,
-    message_link: Optional[str] = None
+    message_link: Optional[str] = None,
+    script: str = "lat"
 ) -> InlineKeyboardMarkup:
     """Constructs Telegram inline action buttons for the order alert."""
     keyboard = []
 
     if is_vip:
+        claim_text = "⚡️ Буюртмани олиш (Банд қилиш)" if script == "cyr" else "⚡️ Buyurtmani olish (Band qilish)"
         keyboard.append([
-            InlineKeyboardButton(text="⚡️ Buyurtmani olish (Band qilish)", callback_data=f"claim_order_{order_id}")
+            InlineKeyboardButton(text=claim_text, callback_data=f"claim_order_{order_id}")
         ])
     else:
         # Paywall Teaser Keyboard -> Direct 1-tap conversion button
+        vip_cta = "⭐️ VIP Обунани фаоллаштириш (25,000 сўм)" if script == "cyr" else "⭐️ VIP Obunani faollashtirish (25,000 so'm)"
         keyboard.append([
-            InlineKeyboardButton(text="⭐️ VIP Obunani faollashtirish (25,000 so'm)", callback_data="show_plans")
+            InlineKeyboardButton(text=vip_cta, callback_data="show_plans")
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -87,14 +90,19 @@ class OrderDispatcher:
         self._total_vip_dispatched = 0
         self._total_teasers_dispatched = 0
 
-    def format_vip_notification(self, order: Dict[str, Any], match_meta: Dict[str, Any]) -> str:
+    def format_vip_notification(self, order: Dict[str, Any], match_meta: Dict[str, Any], script: str = "lat") -> str:
         """Formats full uncensored order alert for active VIP drivers."""
-        return self.matcher.format_notification(order, match_meta)
+        return self.matcher.format_notification(order, match_meta, script=script)
 
-    def format_teaser_notification(self, order: Dict[str, Any], match_meta: Dict[str, Any]) -> str:
+    def format_teaser_notification(self, order: Dict[str, Any], match_meta: Dict[str, Any], script: str = "lat") -> str:
         """Formats clean paywall teaser for expired/free drivers without contacts or marketing bluff."""
         order_type = order.get("order_type", "PASSENGER")
-        header = "Pochta" if order_type == "CARGO" else "Yo'lovchi"
+        if script == "cyr":
+            header = "Почта" if order_type == "CARGO" else "Йўловчи"
+            teaser_note = "🔒 <i>Мижоз хабари ва контактларини кўриш учун VIP обунани фаоллаштиринг.</i>"
+        else:
+            header = "Pochta" if order_type == "CARGO" else "Yo'lovchi"
+            teaser_note = "🔒 <i>Mijoz xabari va kontaktlarini ko'rish uchun VIP obunani faollashtiring.</i>"
 
         origin = order.get("origin") or {}
         dest = order.get("destination") or order.get("dest") or {}
@@ -109,7 +117,7 @@ class OrderDispatcher:
             lines.append(f"📍 {orig_name} ➡️ {dest_name}")
             lines.append("")
 
-        lines.append("🔒 <i>Mijoz xabari va kontaktlarini ko'rish uchun VIP obunani faollashtiring.</i>")
+        lines.append(teaser_note)
         return "\n".join(lines).strip()
 
     async def send_to_driver(
@@ -117,7 +125,8 @@ class OrderDispatcher:
         driver_id: int,
         is_vip: bool,
         order: Dict[str, Any],
-        match_meta: Dict[str, Any]
+        match_meta: Dict[str, Any],
+        script: str = "lat"
     ) -> bool:
         """Dispatches an alert to a single driver."""
         if not self.bot:
@@ -131,8 +140,8 @@ class OrderDispatcher:
 
         try:
             if is_vip:
-                text = self.format_vip_notification(order, match_meta)
-                kb_markup = build_order_action_keyboard(order_id, username, is_vip=True, message_link=message_link)
+                text = self.format_vip_notification(order, match_meta, script=script)
+                kb_markup = build_order_action_keyboard(order_id, username, is_vip=True, message_link=message_link, script=script)
                 await self.bot.send_message(
                     chat_id=driver_id,
                     text=text,
@@ -149,8 +158,8 @@ class OrderDispatcher:
                 if now - last_sent < self.teaser_cooldown_seconds:
                     return False
 
-                text = self.format_teaser_notification(order, match_meta)
-                kb_markup = build_order_action_keyboard(order_id, username, is_vip=False)
+                text = self.format_teaser_notification(order, match_meta, script=script)
+                kb_markup = build_order_action_keyboard(order_id, username, is_vip=False, script=script)
                 await self.bot.send_message(
                     chat_id=driver_id,
                     text=text,
@@ -197,7 +206,8 @@ class OrderDispatcher:
             is_vip = bool(driver.get("is_vip", False))
             matched_drivers.append(driver_id)
 
-            tasks.append(self.send_to_driver(driver_id, is_vip, order, match_meta))
+            driver_script = driver.get("script", "lat")
+            tasks.append(self.send_to_driver(driver_id, is_vip, order, match_meta, script=driver_script))
 
         if not tasks:
             return {"vip_sent": 0, "teaser_sent": 0, "matched_count": 0}
