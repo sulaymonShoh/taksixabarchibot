@@ -310,15 +310,17 @@ async def run_phase3_async_tests():
         "passenger_count": 2,
         "phone_number": "+998884784784",
         "telegram_username": "@vodiy_taxi",
-        "raw_text": "Marxamatdan toshkenga kechasiga 2 ta odam bor +998884784784"
+        "raw_text": "Marxamatdan toshkenga kechasiga 2 ta odam bor +998884784784",
+        "message_link": "https://t.me/c/1234567/89"
     }
     card_text = matcher.format_notification(test_order, match_b)
-    assert "YANGI BUYURTMA" in card_text
-    assert "Marxamat ➡️ Toshkent" in card_text
+    assert "Yo'lovchi" in card_text
+    assert "Marxamatdan toshkenga kechasiga 2 ta odam bor" in card_text
     assert "+998884784784" in card_text
     assert "@vodiy_taxi" in card_text
-    assert "Asaka tranzitida" in card_text
-    print("   [PASS] High-converting alert card formatted correctly with corridor explanation.")
+    assert "Asl xabarni" in card_text
+    assert "https://t.me/c/1234567/89" in card_text
+    print("   [PASS] Minimal alert card formatted correctly with direct contact and message links.")
 
     # ==================== 7. LATENCY BENCHMARK ====================
     print("\n>>> 7. Running Latency Benchmark (100,000 evaluations in memory)...")

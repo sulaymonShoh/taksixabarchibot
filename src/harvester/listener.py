@@ -50,7 +50,8 @@ class HarvesterListener:
         text: str,
         sender_username: Optional[str] = None,
         message_id: Optional[int] = None,
-        message_link: Optional[str] = None
+        message_link: Optional[str] = None,
+        sender_id: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Core processing pipeline for any incoming message:
@@ -82,6 +83,8 @@ class HarvesterListener:
         order["message_hash"] = msg_hash
         order["source_group_id"] = chat_id
         order["source_group_title"] = chat_title
+        if sender_id:
+            order["sender_id"] = sender_id
         if message_id:
             order["message_id"] = message_id
         if message_link:
@@ -131,6 +134,7 @@ class HarvesterListener:
             chat_title = getattr(chat, "title", str(chat_id))
             chat_username = getattr(chat, "username", None)
             sender = await event.get_sender()
+            sender_id = getattr(sender, "id", None) or getattr(event, "sender_id", None)
             sender_username = getattr(sender, "username", None)
             if sender_username:
                 sender_username = f"@{sender_username}"
@@ -151,7 +155,8 @@ class HarvesterListener:
                 text=raw_text,
                 sender_username=sender_username,
                 message_id=message_id,
-                message_link=message_link
+                message_link=message_link,
+                sender_id=sender_id
             )
 
     async def start(self):

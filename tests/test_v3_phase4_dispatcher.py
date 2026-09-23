@@ -98,14 +98,12 @@ async def run_phase4_async_tests():
     print("\n>>> 2. Testing 1-Tap Action Keyboards (VIP vs Teaser)...")
     vip_kb = build_order_action_keyboard(order_id=42, username="@vodiy_taxi", is_vip=True)
     vip_buttons = [b for row in vip_kb.inline_keyboard for b in row]
-    assert any(b.text == "💬 Telegram profil" and b.url == "https://t.me/vodiy_taxi" for b in vip_buttons)
     assert any(b.text == "⚡️ Buyurtmani olish (Band qilish)" and b.callback_data == "claim_order_42" for b in vip_buttons)
-    print("   [PASS] VIP keyboard contains direct Telegram link and Order Claim button.")
+    print("   [PASS] VIP keyboard contains Order Claim button.")
 
     teaser_kb = build_order_action_keyboard(order_id=42, username="@vodiy_taxi", is_vip=False)
     teaser_buttons = [b for row in teaser_kb.inline_keyboard for b in row]
     assert any("VIP Obunani faollashtirish" in b.text and b.callback_data == "show_plans" for b in teaser_buttons)
-    assert not any("Telegram profil" in b.text for b in teaser_buttons)
     print("   [PASS] Teaser keyboard contains direct Paywall VIP conversion CTA.")
 
     # ==================== 3. NOTIFICATION FORMATTING ====================
@@ -135,18 +133,15 @@ async def run_phase4_async_tests():
     vip_card = dispatcher.format_vip_notification(sample_order, sample_match)
     assert "+998901234567" in vip_card
     assert "@vodiy_client" in vip_card
-    assert "Asaka tranzitida" in vip_card
-    assert "YANGI BUYURTMA! [Radar]" in vip_card
+    assert "Yo'lovchi" in vip_card
 
     # Teaser Notification
     teaser_card = dispatcher.format_teaser_notification(sample_order, sample_match)
     assert "+998901234567" not in teaser_card
-    assert "+998 90 ••• •• 67" in teaser_card
     assert "@vodiy_client" not in teaser_card
-    assert "@••••••" in teaser_card
-    assert "[VIP raqam yashirilgan]" in teaser_card
-    assert "VIP obunani" in teaser_card
-    print("   [PASS] VIP full alert and Paywall Teaser card formatted with high fidelity.")
+    assert "VIP obunani faollashtiring" in teaser_card
+    assert "Yo'lovchi" in teaser_card
+    print("   [PASS] VIP minimal alert and Paywall Teaser card formatted with high fidelity.")
 
     # ==================== 4. PARALLEL DISPATCH & TEASER THROTTLING ====================
     print("\n>>> 4. Testing Parallel Dispatch Grid with VIP & Expired Drivers...")
@@ -182,10 +177,10 @@ async def run_phase4_async_tests():
     # Expired received teaser
     exp_msg = next(m for m in mock_bot.sent_messages if m["chat_id"] == expired_driver_id)
     assert "+998901234567" not in exp_msg["text"]
-    assert "•••" in exp_msg["text"]
+    assert "VIP obunani faollashtiring" in exp_msg["text"]
     assert "show_plans" in str(exp_msg["reply_markup"])
     assert exp_msg["disable_notification"] is True
-    print("   [PASS] VIP driver received unmasked alert; Expired driver received masked teaser.")
+    print("   [PASS] VIP driver received unmasked alert; Expired driver received clean teaser.")
 
     # ==================== 5. TEASER RATE LIMITING ====================
     print("\n>>> 5. Testing Teaser Rate Limiting (Anti-Spam)...")

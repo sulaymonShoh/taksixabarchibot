@@ -209,59 +209,50 @@ class CorridorMatcher:
 
     def format_notification(self, order: Dict[str, Any], match_meta: Optional[Dict[str, Any]] = None) -> str:
         """
-        Formats a clean, high-converting Telegram alert for the driver.
+        Formats a clean, minimal Telegram alert for the driver:
+        Yo'lovchi (or Pochta)
+
+        (original message)
+
+        Lichka: @username or id
+        Tel: +998... (if available)
+
+        Asl xabarni ko'rish
         """
-        origin = order.get("origin") or {}
-        dest = order.get("destination") or order.get("dest") or {}
-
-        orig_name = origin.get("name") or order.get("origin_district") or order.get("origin_region") or "Noma'lum"
-        dest_name = dest.get("name") or order.get("dest_district") or order.get("dest_region") or "Toshkent"
         order_type = order.get("order_type", "PASSENGER")
-        phone = order.get("phone_number") or "Guruhdan olingan"
-        username = order.get("telegram_username") or ""
-        raw_text = order.get("raw_text", "").strip()
-        count = order.get("passenger_count", 1)
+        header = "Pochta" if order_type == "CARGO" else "Yo'lovchi"
 
-        type_icon = "👤" if order_type == "PASSENGER" else "📦"
-        type_label = f"{count} kishi (Yo'lovchi)" if order_type == "PASSENGER" else "Pochta / Yuk"
+        raw_text = html.escape(order.get("raw_text", "").strip())
+        username = order.get("telegram_username")
+        sender_id = order.get("sender_id")
+        phone = order.get("phone_number")
+        message_link = order.get("message_link")
 
         lines = [
-            "🎯 <b>YANGI BUYURTMA! [Radar]</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"📍 <b>Yo'nalish:</b> {orig_name} ➡️ {dest_name}",
-            f"{type_icon} <b>Turi:</b> {type_label}",
-            f"📞 <b>Telefon:</b> <code>{phone}</code>",
+            f"<b>{header}</b>",
+            "",
+            raw_text,
         ]
 
+        contacts = []
         if username:
-            lines.append(f"💬 <b>Telegram:</b> {username}")
+            clean_user = username.replace("@", "").strip()
+            contacts.append(f'Lichka: <a href="https://t.me/{clean_user}">@{clean_user}</a>')
+        elif sender_id:
+            contacts.append(f'Lichka: <a href="tg://user?id={sender_id}">{sender_id}</a>')
 
-        clean_raw = html.escape(raw_text)
-        lines.extend([
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"📝 <i>\"{clean_raw}\"</i>",
-            "━━━━━━━━━━━━━━━━━━━━"
-        ])
+        if phone:
+            contacts.append(f"Tel: <code>{phone}</code>")
 
-        source_title = order.get("source_group_title")
-        message_link = order.get("message_link")
+        if contacts:
+            lines.append("")
+            lines.extend(contacts)
+
         if message_link:
-            g_title = html.escape(source_title) if source_title else "Guruh"
-            lines.append(f"🔗 <b>Guruhdagi xabar:</b> <a href=\"{message_link}\">{g_title} ↗️</a>")
+            lines.append("")
+            lines.append(f'Asl xabarni <a href="{message_link}">ko\'rish</a>')
 
-        if match_meta:
-            match_type = match_meta.get("match_type")
-            if match_type == "EXACT":
-                d_name = match_meta.get("district_name", "")
-                lines.append(f"✅ <i>Tanlangan tumaningiz: {d_name}</i>")
-            elif match_type == "CORRIDOR":
-                d_name = match_meta.get("district_name", "")
-                via = match_meta.get("corridor_via_name", "")
-                lines.append(f"🛣 <i>Yo'lak bo'yicha: {d_name} ({via} tranzitida)</i>")
-            elif match_type == "REGIONAL":
-                lines.append("🌐 <i>Umumiy viloyat buyurtmasi</i>")
-
-        return "\n".join(lines)
+        return "\n".join(lines).strip()
 
 
 # Singleton instance

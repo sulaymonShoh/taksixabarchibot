@@ -56,15 +56,6 @@ def build_order_action_keyboard(
     keyboard = []
 
     if is_vip:
-        top_row = []
-        if username:
-            clean_user = username.replace("@", "").strip()
-            top_row.append(InlineKeyboardButton(text="💬 Telegram profil", url=f"https://t.me/{clean_user}"))
-        if message_link:
-            top_row.append(InlineKeyboardButton(text="🔗 Asl xabar", url=message_link))
-        if top_row:
-            keyboard.append(top_row)
-
         keyboard.append([
             InlineKeyboardButton(text="⚡️ Buyurtmani olish (Band qilish)", callback_data=f"claim_order_{order_id}")
         ])
@@ -101,46 +92,25 @@ class OrderDispatcher:
         return self.matcher.format_notification(order, match_meta)
 
     def format_teaser_notification(self, order: Dict[str, Any], match_meta: Dict[str, Any]) -> str:
-        """Formats masked paywall teaser for expired/free drivers."""
+        """Formats clean paywall teaser for expired/free drivers without contacts or marketing bluff."""
+        order_type = order.get("order_type", "PASSENGER")
+        header = "Pochta" if order_type == "CARGO" else "Yo'lovchi"
+
         origin = order.get("origin") or {}
         dest = order.get("destination") or order.get("dest") or {}
-
-        orig_name = origin.get("name") or order.get("origin_district") or order.get("origin_region") or "Noma'lum"
-        dest_name = dest.get("name") or order.get("dest_district") or order.get("dest_region") or "Toshkent"
-        order_type = order.get("order_type", "PASSENGER")
-        phone = order.get("phone_number")
-        username = order.get("telegram_username")
-        raw_text = order.get("raw_text", "").strip()
-        count = order.get("passenger_count", 1)
-
-        masked_phone = mask_phone_number(phone)
-        masked_user = mask_telegram_username(username)
-        masked_text = mask_raw_text(raw_text)
-
-        type_icon = "👤" if order_type == "PASSENGER" else "📦"
-        type_label = f"{count} kishi (Yo'lovchi)" if order_type == "PASSENGER" else "Pochta / Yuk"
+        orig_name = origin.get("name") or order.get("origin_district") or order.get("origin_region")
+        dest_name = dest.get("name") or order.get("dest_district") or order.get("dest_region")
 
         lines = [
-            "🔒 <b>YANGI BUYURTMA! [Radar Teaser]</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"📍 <b>Yo'nalish:</b> {orig_name} ➡️ {dest_name}",
-            f"{type_icon} <b>Turi:</b> {type_label}",
-            f"📞 <b>Telefon:</b> <code>{masked_phone}</code>",
+            f"<b>{header}</b>",
+            ""
         ]
+        if orig_name and dest_name:
+            lines.append(f"📍 {orig_name} ➡️ {dest_name}")
+            lines.append("")
 
-        if masked_user:
-            lines.append(f"💬 <b>Telegram:</b> {masked_user}")
-
-        lines.extend([
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"📝 <i>\"{masked_text[:160]}\"</i>",
-            "━━━━━━━━━━━━━━━━━━━━",
-            "⚠️ <b>DIQQAT:</b> Mijoz telefon raqami va profilini to'liq ko'rish uchun <b>VIP obunani</b> faollashtiring!",
-            "",
-            "💡 <i>VIP haydovchilar buyurtmalarni guruhga chiqishi bilanoq 0.5 soniyada to'liq qabul qilishmoqda!</i>"
-        ])
-
-        return "\n".join(lines)
+        lines.append("🔒 <i>Mijoz xabari va kontaktlarini ko'rish uchun VIP obunani faollashtiring.</i>")
+        return "\n".join(lines).strip()
 
     async def send_to_driver(
         self,
