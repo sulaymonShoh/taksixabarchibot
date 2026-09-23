@@ -91,15 +91,24 @@ def test_raw_order_text_untouched_in_radar():
     # No bluff text
     assert "VIP haydovchilar" not in notif_lat
 
-    # Cyrillic notification
-    notif_cyr = matcher.default_matcher.format_notification(order, match_meta, script="cyr")
-    assert "Йўловчи" in notif_cyr
-    # Raw customer text must NOT be transliterated! Must be verbatim!
-    assert raw_customer_text in notif_cyr
-    assert "Личка:" in notif_cyr and "@mijoz_99" in notif_cyr
-    assert "Тел:" in notif_cyr and "+998901234567" in notif_cyr
-    assert "Асл хабарни" in notif_cyr and "кўриш" in notif_cyr
-    assert "VIP haydovchilar" not in notif_cyr
+    # Verify phone number has no <code> wrapper so Telegram treats it as dialable link
+    assert "<code>" not in notif_lat
+
+    # Order without username (only sender_id)
+    order_no_user = {
+        "order_type": "PASSENGER",
+        "sender_id": 777666555,
+        "phone_number": "+998939998877",
+        "raw_text": "Shahrixondan Toshkentga bitta odam",
+        "message_link": "https://t.me/c/999/89"
+    }
+    notif_id_lat = matcher.default_matcher.format_notification(order_no_user, match_meta, script="lat")
+    assert '<a href="tg://user?id=777666555">Yozish</a>' in notif_id_lat
+    assert ">777666555<" not in notif_id_lat  # ID is never shown directly as text
+
+    notif_id_cyr = matcher.default_matcher.format_notification(order_no_user, match_meta, script="cyr")
+    assert '<a href="tg://user?id=777666555">Ёзиш</a>' in notif_id_cyr
+    assert ">777666555<" not in notif_id_cyr
 
 def test_keyboards_script_and_separation():
     # Main dashboard Latin

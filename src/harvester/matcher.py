@@ -226,12 +226,14 @@ class CorridorMatcher:
             tel_label = "Тел"
             asl_link_text = "Асл хабарни"
             korish_word = "кўриш"
+            yozish_word = "Ёзиш"
         else:
             header = "Pochta" if order_type == "CARGO" else "Yo'lovchi"
             lichka_label = "Lichka"
             tel_label = "Tel"
             asl_link_text = "Asl xabarni"
             korish_word = "ko'rish"
+            yozish_word = "Yozish"
 
         raw_text = html.escape(order.get("raw_text", "").strip())
         username = order.get("telegram_username")
@@ -246,14 +248,14 @@ class CorridorMatcher:
         ]
 
         contacts = []
-        if username:
+        if username and not username.lstrip("@").isdigit():
             clean_user = username.replace("@", "").strip()
             contacts.append(f'{lichka_label}: <a href="https://t.me/{clean_user}">@{clean_user}</a>')
         elif sender_id:
-            contacts.append(f'{lichka_label}: <a href="tg://user?id={sender_id}">{sender_id}</a>')
+            contacts.append(f'{lichka_label}: <a href="tg://user?id={sender_id}">{yozish_word}</a>')
 
         if phone:
-            contacts.append(f"{tel_label}: <code>{phone}</code>")
+            contacts.append(f"{tel_label}: {phone}")
 
         if contacts:
             lines.append("")
