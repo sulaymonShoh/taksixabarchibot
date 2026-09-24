@@ -951,6 +951,10 @@ def compute_group_quality(g: Dict[str, Any]) -> Dict[str, Any]:
     spam_msgs = g.get("spam_messages") or 0
     seen_msgs = g.get("total_messages_seen") or 0
 
+    # Reconcile legacy orders harvested before the column split
+    if total_orders > (pass_orders + cargo_orders):
+        pass_orders = max(pass_orders, total_orders - cargo_orders)
+
     # Ensure total messages seen is at least orders + spam
     total_msgs = max(seen_msgs, total_orders + spam_msgs)
 
