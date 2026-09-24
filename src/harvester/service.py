@@ -4,7 +4,10 @@ group entity resolution, auto-joining, and connects real-time MTProto streams
 to HarvesterListener.
 """
 import os
+import asyncio
+import inspect
 import contextlib
+from datetime import datetime
 from typing import Optional, Dict, Any
 from telethon import TelegramClient
 from telethon.utils import get_peer_id
@@ -12,7 +15,7 @@ from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
 from telethon.errors import UserAlreadyParticipantError
 
-from src.config import API_ID, API_HASH, SESSIONS_DIR, HARVESTER_SESSION_NAME
+from src.config import API_ID, API_HASH, SESSIONS_DIR, HARVESTER_SESSION_NAME, ADMIN_ID
 from src.harvester.listener import HarvesterListener
 from src.harvester.geo_tagger import detect_group_region
 from src import database as db
@@ -29,6 +32,16 @@ class HarvesterService:
         self._user_info: Optional[Dict[str, Any]] = None
         self._is_running = False
 
+        # Watchdog & Supervisor telemetry
+        self._status: str = "IDLE"  # "ONLINE", "RECONNECTING", "OFFLINE", "ERROR", "IDLE"
+        self._watchdog_task: Optional[asyncio.Task] = None
+        self._watchdog_interval: int = 20  # seconds between health checks
+        self._consecutive_failures: int = 0
+        self._last_heartbeat: Optional[datetime] = None
+        self._last_error: Optional[str] = None
+        self._alert_sent: bool = False
+        self.bot: Any = None  # aiogram Bot instance for admin alerting
+
     def is_session_available(self) -> bool:
         """Returns True if the .session file exists on disk."""
         return os.path.exists(f"{self.session_path}.session") or os.path.exists(self.session_path)
@@ -38,11 +51,13 @@ class HarvesterService:
         return bool(self.client and self.client.is_connected() and self._is_running)
 
     async def start(self) -> bool:
-        """Connects the userbot client and starts the real-time HarvesterListener."""
+        """Connects the userbot client, starts the real-time HarvesterListener and watchdog."""
         if self.is_connected():
+            self.start_watchdog()
             return True
 
         if not self.is_session_available():
+            self._status = "OFFLINE"
             logger.warning(
                 f"Harvester session file '{self.session_path}.session' not found. "
                 "Harvester userbot is idle. Session not connected."
@@ -54,6 +69,8 @@ class HarvesterService:
             await self.client.connect()
 
             if not await self.client.is_user_authorized():
+                self._status = "ERROR"
+                self._last_error = "Harvester userbot session is not authorized"
                 logger.warning("Harvester userbot session is not authorized. Please log in.")
                 await self.client.disconnect()
                 self.client = None
@@ -76,20 +93,233 @@ class HarvesterService:
             self.listener = HarvesterListener(client=self.client)
             await self.listener.start()
             self._is_running = True
+            self._status = "ONLINE"
+            self._consecutive_failures = 0
+            self._last_heartbeat = datetime.utcnow()
+            self._last_error = None
+
+            # Start background watchdog supervisor
+            self.start_watchdog()
             return True
         except Exception as e:
+            self._status = "ERROR"
+            self._last_error = str(e)
             logger.error(f"Failed to start HarvesterService: {e}", exc_info=True)
             self._is_running = False
             return False
 
     async def stop(self):
-        """Stops the harvester listener and disconnects client."""
+        """Stops the harvester listener, supervisor watchdog, and disconnects client."""
         self._is_running = False
+        self._status = "OFFLINE"
+        self.stop_watchdog()
         if self.listener:
-            await self.listener.stop()
+            with contextlib.suppress(Exception):
+                res = self.listener.stop()
+                if inspect.isawaitable(res):
+                    await res
         if self.client and self.client.is_connected():
-            await self.client.disconnect()
+            with contextlib.suppress(Exception):
+                await self.client.disconnect()
         logger.info("HarvesterService stopped.")
+
+    def start_watchdog(self):
+        """Starts background supervisor watchdog if not already running."""
+        if self._watchdog_task is None or self._watchdog_task.done():
+            self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+            logger.info("Harvester watchdog supervisor started.")
+
+    def stop_watchdog(self):
+        """Cancels background supervisor watchdog."""
+        if self._watchdog_task and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
+            self._watchdog_task = None
+            logger.info("Harvester watchdog supervisor stopped.")
+
+    async def _watchdog_loop(self):
+        """
+        Periodic watchdog loop that inspects the health of Harvester userbot and listener.
+        Triggers auto-reconnection if the client socket drops or listener stops.
+        Alerts SuperAdmin on repeated persistent failures.
+        """
+        while self._is_running:
+            try:
+                await asyncio.sleep(self._watchdog_interval)
+                if not self._is_running:
+                    break
+
+                if not self.is_session_available():
+                    self._status = "OFFLINE"
+                    self._consecutive_failures += 1
+                    continue
+
+                healthy = False
+                if self.client and self.client.is_connected():
+                    try:
+                        is_auth = await self.client.is_user_authorized()
+                        if is_auth and self.listener and self.listener._is_running:
+                            healthy = True
+                    except Exception as e:
+                        logger.warning(f"Harvester health check query failed: {e}")
+                        healthy = False
+
+                if healthy:
+                    self._status = "ONLINE"
+                    self._last_heartbeat = datetime.utcnow()
+                    self._consecutive_failures = 0
+                    if self._alert_sent:
+                        await self._notify_admin_recovery()
+                        self._alert_sent = False
+                else:
+                    self._consecutive_failures += 1
+                    logger.warning(
+                        f"⚠️ Harvester watchdog detected unhealthy state! "
+                        f"(Failures: {self._consecutive_failures}, Status: {self._status})"
+                    )
+
+                    if self._consecutive_failures >= 3 and not self._alert_sent:
+                        await self._notify_admin_disconnect()
+                        self._alert_sent = True
+
+                    await self.reconnect()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Unexpected error in harvester watchdog loop: {e}", exc_info=True)
+
+    async def reconnect(self, backoff_seconds: Optional[int] = None) -> bool:
+        """
+        Attempts clean reconnection of the userbot client and restarts listener.
+        Uses exponential backoff based on consecutive failures unless specified.
+        """
+        self._status = "RECONNECTING"
+
+        if backoff_seconds is None:
+            # 5s, 10s, 20s, up to 60s
+            backoff_seconds = min(60, 5 * (2 ** max(0, min(self._consecutive_failures - 1, 4))))
+
+        if backoff_seconds > 0:
+            logger.info(f"Harvester reconnecting in {backoff_seconds}s (attempt #{self._consecutive_failures})...")
+            await asyncio.sleep(backoff_seconds)
+
+        # 1. Cleanly disconnect previous client if exists
+        try:
+            if self.listener:
+                await self.listener.stop()
+            if self.client:
+                with contextlib.suppress(Exception):
+                    await self.client.disconnect()
+        except Exception as e:
+            logger.debug(f"Error during harvester client cleanup: {e}")
+        finally:
+            self.client = None
+            self.listener = None
+
+        # 2. Check session existence
+        if not self.is_session_available():
+            self._status = "OFFLINE"
+            self._last_error = "Session file not found"
+            return False
+
+        # 3. Connect fresh client
+        try:
+            self.client = TelegramClient(self.session_path, API_ID, API_HASH)
+            await self.client.connect()
+
+            if not await self.client.is_user_authorized():
+                logger.warning("Harvester userbot session is not authorized during reconnect.")
+                await self.client.disconnect()
+                self.client = None
+                self._status = "ERROR"
+                self._last_error = "Session not authorized"
+                return False
+
+            me = await self.client.get_me()
+            self._user_info = {
+                "id": me.id,
+                "first_name": me.first_name,
+                "last_name": me.last_name,
+                "username": f"@{me.username}" if me.username else None,
+                "phone": getattr(me, "phone", None)
+            }
+
+            # 4. Re-attach and restart HarvesterListener
+            self.listener = HarvesterListener(client=self.client)
+            await self.listener.start()
+
+            self._is_running = True
+            self._status = "ONLINE"
+            self._last_heartbeat = datetime.utcnow()
+            self._consecutive_failures = 0
+            self._last_error = None
+            logger.info(f"✅ Harvester Userbot successfully reconnected and listening! ({me.first_name})")
+
+            if self._alert_sent:
+                await self._notify_admin_recovery()
+                self._alert_sent = False
+
+            return True
+        except Exception as e:
+            self._status = "ERROR"
+            self._last_error = str(e)
+            logger.error(f"Harvester reconnection attempt failed: {e}")
+            return False
+
+    async def _notify_admin_disconnect(self):
+        """Sends an urgent notification to SuperAdmin on persistent disconnection."""
+        if not self.bot or not ADMIN_ID:
+            return
+        try:
+            err_msg = self._last_error or "Telegram bilan aloqa uzildi"
+            text = (
+                "⚠️ <b>DIQQAT: Harvester Userbot uzilib qoldi!</b>\n\n"
+                f"📡 Holat: <code>{self._status}</code>\n"
+                f"❌ Muvaffaqiyatsiz urinishlar: <b>{self._consecutive_failures}</b> marta\n"
+                f"📝 Sabab: <i>{err_msg}</i>\n\n"
+                "Tizim avtomatik qayta ulanishga harakat qilmoqda. "
+                "Web panel yoki /admin orqali holatni tekshirishingiz mumkin."
+            )
+            await self.bot.send_message(chat_id=int(ADMIN_ID), text=text, parse_mode="HTML")
+            logger.info("Sent harvester disconnect alert to SuperAdmin.")
+        except Exception as e:
+            logger.warning(f"Failed to send harvester disconnect alert to admin: {e}")
+
+    async def _notify_admin_recovery(self):
+        """Sends a notification to SuperAdmin when harvester recovers connection."""
+        if not self.bot or not ADMIN_ID:
+            return
+        try:
+            u_title = (self._user_info.get('first_name') or 'Userbot') if self._user_info else 'Userbot'
+            u_contact = (self._user_info.get('username') or self._user_info.get('phone') or 'Ulangan') if self._user_info else ''
+            text = (
+                "✅ <b>Harvester Userbot aloqasi tiklandi!</b>\n\n"
+                f"👤 Akkaunt: <b>{u_title}</b> ({u_contact})\n"
+                "📡 Holat: <code>🟢 ONLINE</code>\n"
+                "Buyurtmalarni monitoring qilish davom etmoqda."
+            )
+            await self.bot.send_message(chat_id=int(ADMIN_ID), text=text, parse_mode="HTML")
+            logger.info("Sent harvester recovery alert to SuperAdmin.")
+        except Exception as e:
+            logger.warning(f"Failed to send harvester recovery alert to admin: {e}")
+
+    async def broadcast_to_groups(self, text: str) -> Dict[str, Any]:
+        """Broadcasts a text message to all active monitored harvester groups."""
+        if not self.is_connected() or not self.client:
+            return {"success": False, "error": "Userbot ulanmagan"}
+        groups = await db.get_harvester_groups(active_only=True)
+        if not groups:
+            return {"success": False, "error": "Faol guruhlar mavjud emas"}
+        sent = 0
+        failed = 0
+        for g in groups:
+            try:
+                await self.client.send_message(g["group_id"], text)
+                sent += 1
+                await asyncio.sleep(1.0)
+            except Exception as e:
+                logger.warning(f"Failed to broadcast to group {g.get('group_id')}: {e}")
+                failed += 1
+        return {"success": True, "sent": sent, "failed": failed}
 
     async def reload_groups(self):
         """Refreshes monitored groups in the active listener."""
@@ -221,10 +451,14 @@ class HarvesterService:
             return {"success": False, "error": f"Guruhni topib bo'lmadi: {str(e)}"}
 
     def get_status(self) -> Dict[str, Any]:
-        """Returns the current connection and user status."""
+        """Returns the current connection, watchdog and user status."""
         return {
+            "status": self._status,
             "is_available": self.is_session_available(),
             "is_connected": self.is_connected(),
+            "consecutive_failures": self._consecutive_failures,
+            "last_heartbeat": self._last_heartbeat.strftime('%Y-%m-%d %H:%M:%S') if self._last_heartbeat else None,
+            "last_error": self._last_error,
             "user_info": self._user_info or {},
             "session_name": self.session_name
         }

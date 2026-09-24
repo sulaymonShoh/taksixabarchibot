@@ -2333,11 +2333,17 @@ async def render_admin_harvester_hub(message_or_call):
     passenger_orders = h_stats.get("passenger_orders", 0)
     cargo_orders = h_stats.get("cargo_orders", 0)
 
+    status = hb_status.get("status", "ONLINE" if is_online else "OFFLINE")
     if is_online:
         u_name = html.escape(str(u_info.get("username") or u_info.get("phone") or "Ulangan"))
-        status_line = f"🟢 <b>FAOL</b> (<code>{u_name}</code>, ID: <code>{u_info.get('id')}</code>)"
+        status_line = f"🟢 <b>FAOL (ONLINE)</b> (<code>{u_name}</code>, ID: <code>{u_info.get('id')}</code>)"
+    elif status == "RECONNECTING":
+        fail_count = hb_status.get("consecutive_failures", 1)
+        status_line = f"🟡 <b>QAYTA ULANMOQDA...</b> (Urinish: #{fail_count})\n<i>(Tarmoq uzilishi tufayli tiklanmoqda)</i>"
     else:
-        status_line = "🔴 <b>ULANMAGAN</b>\n<i>(Userbot sessiyasi ulanmagan)</i>"
+        last_err = hb_status.get("last_error")
+        err_hint = f"\n<i>(Xato: {html.escape(last_err)})</i>" if last_err else ""
+        status_line = f"🔴 <b>ULANMAGAN (OFFLINE)</b>{err_hint}\n<i>(Userbot sessiyasi ulanmagan)</i>"
 
     text = (
         "📡 <b>Harvester Radar — Boshqaruv Markazi</b>\n\n"
@@ -2365,6 +2371,15 @@ async def admin_harvester_call(call: CallbackQuery):
         return
     await render_admin_harvester_hub(call)
     await safe_answer(call)
+
+@router.callback_query(F.data == "admin_reconnect_harvester")
+async def admin_reconnect_harvester_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await safe_answer(call, "🔄 Userbot qayta ulanmoqda...", show_alert=False)
+    from src.harvester.service import default_harvester_service
+    await default_harvester_service.reconnect(backoff_seconds=0)
+    await render_admin_harvester_hub(call)
 
 @router.message(Command("harvester"))
 @router.message(Command("radar_admin"))

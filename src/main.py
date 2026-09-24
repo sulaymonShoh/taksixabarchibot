@@ -38,6 +38,7 @@ async def main():
     
     # 4. Initialize Harvester Service (Stage 6)
     from src.harvester.service import default_harvester_service
+    default_harvester_service.bot = bot
     bot.harvester_service = default_harvester_service
     web_app.state.harvester_service = default_harvester_service
     asyncio.create_task(default_harvester_service.start())

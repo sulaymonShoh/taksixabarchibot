@@ -382,9 +382,19 @@ async def api_harvester_stats(username: str = Depends(verify_credentials)):
     stats = await db.get_harvester_stats()
     hb_status = default_harvester_service.get_status()
     stats["userbot_online"] = hb_status["is_connected"]
+    stats["userbot_status"] = hb_status.get("status", "IDLE")
+    stats["userbot_consecutive_failures"] = hb_status.get("consecutive_failures", 0)
+    stats["userbot_last_heartbeat"] = hb_status.get("last_heartbeat")
     stats["userbot_username"] = hb_status.get("user_info", {}).get("username")
     stats["userbot_phone"] = hb_status.get("user_info", {}).get("phone")
     return JSONResponse(stats)
+
+@app.post("/api/harvester/reconnect")
+async def api_harvester_reconnect(username: str = Depends(verify_credentials)):
+    from src.harvester.service import default_harvester_service
+    success = await default_harvester_service.reconnect(backoff_seconds=0)
+    status = default_harvester_service.get_status()
+    return JSONResponse({"success": success, "status": status})
 
 @app.get("/api/harvester/groups")
 async def api_harvester_groups(active_only: bool = False, username: str = Depends(verify_credentials)):
