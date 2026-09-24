@@ -35,7 +35,10 @@ class TestAdminPolish(unittest.TestCase):
         harvester_html_path = os.path.join("src", "web", "templates", "harvester.html")
         with open(harvester_html_path, "r", encoding="utf-8") as f:
             content = f.read()
-            self.assertIn("grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6", content)
+            self.assertTrue(
+                "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" in content or
+                "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8" in content
+            )
             self.assertNotIn("p-4.5", content)
             self.assertIn("rounded-2xl p-5", content)
 

@@ -367,14 +367,21 @@ async def view_harvester(request: Request, username: str = Depends(verify_creden
     orders = await db.get_recent_harvested_orders(limit=50)
     pending = await db.get_pending_payment_requests()
     hb_status = default_harvester_service.get_status()
+    analytics = await db.get_group_quality_analytics()
     return templates.TemplateResponse(request=request, name="harvester.html", context={
         "active_page": "harvester",
         "stats": stats,
         "groups": groups,
         "orders": orders,
         "pending_count": len(pending),
-        "userbot": hb_status
+        "userbot": hb_status,
+        "analytics": analytics
     })
+
+@app.get("/api/harvester/analytics")
+async def api_harvester_analytics(username: str = Depends(verify_credentials)):
+    analytics = await db.get_group_quality_analytics()
+    return JSONResponse(analytics)
 
 @app.get("/api/harvester/stats")
 async def api_harvester_stats(username: str = Depends(verify_credentials)):

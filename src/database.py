@@ -166,9 +166,28 @@ async def init_db():
                 is_active BOOLEAN DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_message_at TIMESTAMP,
-                total_harvested INTEGER DEFAULT 0
+                total_harvested INTEGER DEFAULT 0,
+                total_messages_seen INTEGER DEFAULT 0,
+                passenger_orders INTEGER DEFAULT 0,
+                cargo_orders INTEGER DEFAULT 0,
+                spam_messages INTEGER DEFAULT 0,
+                last_order_at TIMESTAMP
             )
         ''')
+
+        # Check and migrate harvester_groups columns if missing
+        async with db.execute("PRAGMA table_info(harvester_groups)") as cursor:
+            hg_columns = [row[1] for row in await cursor.fetchall()]
+            if 'total_messages_seen' not in hg_columns:
+                await db.execute("ALTER TABLE harvester_groups ADD COLUMN total_messages_seen INTEGER DEFAULT 0")
+            if 'passenger_orders' not in hg_columns:
+                await db.execute("ALTER TABLE harvester_groups ADD COLUMN passenger_orders INTEGER DEFAULT 0")
+            if 'cargo_orders' not in hg_columns:
+                await db.execute("ALTER TABLE harvester_groups ADD COLUMN cargo_orders INTEGER DEFAULT 0")
+            if 'spam_messages' not in hg_columns:
+                await db.execute("ALTER TABLE harvester_groups ADD COLUMN spam_messages INTEGER DEFAULT 0")
+            if 'last_order_at' not in hg_columns:
+                await db.execute("ALTER TABLE harvester_groups ADD COLUMN last_order_at TIMESTAMP")
 
         # Harvested orders archive
         await db.execute('''
@@ -896,8 +915,76 @@ async def add_harvester_group(group_id: int, title: str, username: Optional[str]
             row = await cursor.fetchone()
             return row[0] if row else 0
 
-async def get_harvester_groups(active_only: bool = False) -> List[Dict[str, Any]]:
-    """Retrieves list of all monitored harvester groups."""
+def compute_group_quality(g: Dict[str, Any]) -> Dict[str, Any]:
+    """Helper to compute quality score, grade, and recommendation for a group record."""
+    total_orders = g.get("total_harvested") or 0
+    pass_orders = g.get("passenger_orders") or 0
+    cargo_orders = g.get("cargo_orders") or 0
+    spam_msgs = g.get("spam_messages") or 0
+    seen_msgs = g.get("total_messages_seen") or 0
+
+    # Ensure total messages seen is at least orders + spam
+    total_msgs = max(seen_msgs, total_orders + spam_msgs)
+
+    if total_msgs > 0:
+        quality_score = round(min(100.0, (total_orders / total_msgs) * 100.0), 1)
+    else:
+        quality_score = 0.0
+
+    if quality_score >= 15.0 and total_orders >= 5:
+        grade = "A"
+        grade_label = "Yuqori (Goldmine)"
+        emoji = "⭐"
+        recommendation = "A'lo darajadagi buyurtma oqimi"
+    elif quality_score >= 5.0 or (total_orders > 0 and total_msgs < 50):
+        grade = "B"
+        grade_label = "O'rtacha"
+        emoji = "🟡"
+        recommendation = "Barqaror monitoring"
+    else:
+        grade = "C"
+        grade_label = "Past (Spam ko'p)"
+        emoji = "🔴"
+        recommendation = "Ko'p spam: To'xtatish tavsiya etiladi" if total_msgs >= 50 else "Yangi / Ma'lumot kam"
+
+    res = dict(g)
+    res["total_messages_seen"] = total_msgs
+    res["passenger_orders"] = pass_orders
+    res["cargo_orders"] = cargo_orders
+    res["spam_messages"] = spam_msgs
+    res["quality_score"] = quality_score
+    res["quality_grade"] = grade
+    res["quality_grade_label"] = grade_label
+    res["quality_emoji"] = emoji
+    res["recommendation"] = recommendation
+    return res
+
+async def record_group_messages_batch(updates: Dict[int, Dict[str, int]]):
+    """
+    Batched update for group telemetry (seen messages, spam messages).
+    updates format: {group_id: {"seen": count, "spam": count}}
+    """
+    if not updates:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        for group_id, counts in updates.items():
+            seen = counts.get("seen", 0)
+            spam = counts.get("spam", 0)
+            if seen > 0 or spam > 0:
+                await db.execute(
+                    """
+                    UPDATE harvester_groups
+                    SET total_messages_seen = COALESCE(total_messages_seen, 0) + ?,
+                        spam_messages = COALESCE(spam_messages, 0) + ?,
+                        last_message_at = CURRENT_TIMESTAMP
+                    WHERE group_id = ?
+                    """,
+                    (seen, spam, group_id)
+                )
+        await db.commit()
+
+async def get_harvester_groups(active_only: bool = False, sort_by: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieves list of all monitored harvester groups enriched with quality analytics."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         sql = 'SELECT * FROM harvester_groups'
@@ -906,15 +993,59 @@ async def get_harvester_groups(active_only: bool = False) -> List[Dict[str, Any]
         sql += ' ORDER BY id DESC'
         async with db.execute(sql) as cursor:
             rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+            enriched = [compute_group_quality(dict(r)) for r in rows]
+
+            if sort_by == "quality":
+                enriched.sort(key=lambda x: (x["quality_score"], x["total_harvested"]), reverse=True)
+            elif sort_by == "orders":
+                enriched.sort(key=lambda x: x["total_harvested"], reverse=True)
+            elif sort_by == "spam":
+                enriched.sort(key=lambda x: x["spam_messages"], reverse=True)
+
+            return enriched
 
 async def get_harvester_group(group_id: int) -> Optional[Dict[str, Any]]:
-    """Retrieves a single harvester group by its Telegram chat/group ID."""
+    """Retrieves a single harvester group by its Telegram chat/group ID enriched with quality analytics."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute('SELECT * FROM harvester_groups WHERE group_id = ?', (group_id,)) as cursor:
             row = await cursor.fetchone()
-            return dict(row) if row else None
+            return compute_group_quality(dict(row)) if row else None
+
+async def get_group_quality_analytics() -> Dict[str, Any]:
+    """Returns aggregated group quality intelligence across all monitored groups."""
+    groups = await get_harvester_groups(active_only=False)
+    total_groups = len(groups)
+    active_groups = sum(1 for g in groups if g["is_active"])
+    
+    total_orders = sum(g["total_harvested"] for g in groups)
+    total_passenger = sum(g["passenger_orders"] for g in groups)
+    total_cargo = sum(g["cargo_orders"] for g in groups)
+    total_spam = sum(g["spam_messages"] for g in groups)
+    total_seen = sum(g["total_messages_seen"] for g in groups)
+
+    avg_quality = round((total_orders / total_seen * 100.0), 1) if total_seen > 0 else 0.0
+    spam_rate = round((total_spam / total_seen * 100.0), 1) if total_seen > 0 else 0.0
+
+    active_groups_list = [g for g in groups if g["is_active"]]
+    sorted_by_quality = sorted(active_groups_list, key=lambda x: (x["quality_score"], x["total_harvested"]), reverse=True)
+    top_goldmines = sorted_by_quality[:5]
+
+    worst_spam = sorted([g for g in active_groups_list if g["total_messages_seen"] >= 5], key=lambda x: x["quality_score"])[:5]
+
+    return {
+        "total_groups": total_groups,
+        "active_groups": active_groups,
+        "total_orders": total_orders,
+        "total_passenger": total_passenger,
+        "total_cargo": total_cargo,
+        "total_spam": total_spam,
+        "total_messages_seen": total_seen,
+        "avg_quality_score": avg_quality,
+        "spam_rate": spam_rate,
+        "top_goldmines": top_goldmines,
+        "worst_spam": worst_spam
+    }
 
 async def toggle_harvester_group(group_id: int, is_active: bool) -> bool:
     """Enables or disables listening for a specific harvester group."""
@@ -979,14 +1110,20 @@ async def save_harvested_order(order_data: Dict[str, Any]) -> Optional[int]:
             
             # Update group stats if group_id is provided
             if source_group_id:
+                is_pass = 1 if order_type == "PASSENGER" else 0
+                is_cargo = 1 if order_type == "CARGO" else 0
                 await db.execute(
                     """
                     UPDATE harvester_groups
                     SET total_harvested = total_harvested + 1,
-                        last_message_at = CURRENT_TIMESTAMP
+                        passenger_orders = COALESCE(passenger_orders, 0) + ?,
+                        cargo_orders = COALESCE(cargo_orders, 0) + ?,
+                        total_messages_seen = COALESCE(total_messages_seen, 0) + 1,
+                        last_message_at = CURRENT_TIMESTAMP,
+                        last_order_at = CURRENT_TIMESTAMP
                     WHERE group_id = ?
                     """,
-                    (source_group_id,)
+                    (is_pass, is_cargo, source_group_id)
                 )
             
             await db.commit()
@@ -1049,8 +1186,17 @@ async def get_harvester_stats() -> Dict[str, Any]:
         async with db.execute('SELECT COUNT(*) FROM harvester_groups WHERE is_active = 1') as cursor:
             active_groups = (await cursor.fetchone())[0]
 
+        # 5. Spam and total messages aggregation
+        async with db.execute('SELECT SUM(spam_messages), SUM(total_messages_seen) FROM harvester_groups') as cursor:
+            spam_row = await cursor.fetchone()
+            total_spam = (spam_row[0] or 0) if spam_row else 0
+            total_messages_seen = (spam_row[1] or 0) if spam_row else 0
+
     active_drivers = await get_active_radar_drivers()
     vip_drivers_count = sum(1 for d in active_drivers if d.get("is_vip"))
+
+    total_msg_calc = max(total_messages_seen, total_orders + total_spam)
+    avg_quality = round((total_orders / total_msg_calc * 100.0), 1) if total_msg_calc > 0 else 0.0
 
     return {
         "total_orders": total_orders,
@@ -1059,6 +1205,9 @@ async def get_harvester_stats() -> Dict[str, Any]:
         "cargo_orders": cargo_orders,
         "total_groups": total_groups,
         "active_groups": active_groups,
+        "total_spam": total_spam,
+        "total_messages_seen": total_msg_calc,
+        "avg_quality_score": avg_quality,
         "active_radar_drivers": len(active_drivers),
         "vip_radar_drivers": vip_drivers_count
     }

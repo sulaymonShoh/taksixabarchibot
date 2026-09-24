@@ -37,6 +37,9 @@ class HarvesterListener:
         self._is_running = False
         self._monitored_chat_ids: List[int] = []
         self._monitored_groups_cache: Dict[int, Dict[str, Any]] = {}
+        self._stats_buffer: Dict[int, Dict[str, int]] = {}
+        self._flush_task: Optional[asyncio.Task] = None
+        self._flush_interval: int = 10  # seconds between batched DB flushes
 
     async def reload_monitored_groups(self):
         """Refreshes active group IDs and metadata cache from the database."""
@@ -168,6 +171,9 @@ class HarvesterListener:
             if len(raw_text.strip()) < 5:
                 return
 
+            # Record raw message seen in group telemetry buffer
+            self.record_activity(chat_id, seen=1)
+
             # 1. Fast in-memory deduplication check (<0.05ms)
             if self.dedup.is_duplicate(raw_text):
                 return
@@ -176,6 +182,8 @@ class HarvesterListener:
             # Rejects 95%+ of messages (driver ads, spam, greetings) immediately!
             order = self.parser.parse(raw_text)
             if not order:
+                # Driver ad / spam rejected!
+                self.record_activity(chat_id, spam=1)
                 return
 
             # Message is a verified passenger or cargo order!
@@ -220,6 +228,35 @@ class HarvesterListener:
         except Exception as e:
             logger.error(f"Error in harvester _process_event: {e}", exc_info=True)
 
+    def record_activity(self, chat_id: int, seen: int = 0, spam: int = 0):
+        """Buffers raw message telemetry in memory for batched database persistence."""
+        if chat_id not in self._stats_buffer:
+            self._stats_buffer[chat_id] = {"seen": 0, "spam": 0}
+        self._stats_buffer[chat_id]["seen"] += seen
+        self._stats_buffer[chat_id]["spam"] += spam
+
+    async def flush_stats_buffer(self):
+        """Flushes in-memory group telemetry counters to the database."""
+        if not self._stats_buffer:
+            return
+        buffer_copy = dict(self._stats_buffer)
+        self._stats_buffer.clear()
+        try:
+            await db.record_group_messages_batch(buffer_copy)
+        except Exception as e:
+            logger.warning(f"Error flushing group analytics buffer: {e}")
+
+    async def _flush_loop(self):
+        """Periodic background task to flush analytics counters every N seconds."""
+        while self._is_running:
+            try:
+                await asyncio.sleep(self._flush_interval)
+                await self.flush_stats_buffer()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in analytics flush loop: {e}")
+
     def setup_event_handlers(self):
         """Attaches Telethon events.NewMessage handler to the client."""
         if not self.client:
@@ -241,13 +278,19 @@ class HarvesterListener:
             asyncio.create_task(self._process_event(event, chat_id))
 
     async def start(self):
-        """Starts the harvester listener."""
+        """Starts the harvester listener and background stats flush loop."""
         self._is_running = True
         await self.reload_monitored_groups()
         self.setup_event_handlers()
+        if self._flush_task is None or self._flush_task.done():
+            self._flush_task = asyncio.create_task(self._flush_loop())
         logger.info("HarvesterListener started successfully.")
 
     async def stop(self):
-        """Stops the harvester listener."""
+        """Stops the harvester listener and flushes pending telemetry."""
         self._is_running = False
+        if self._flush_task and not self._flush_task.done():
+            self._flush_task.cancel()
+            self._flush_task = None
+        await self.flush_stats_buffer()
         logger.info("HarvesterListener stopped.")

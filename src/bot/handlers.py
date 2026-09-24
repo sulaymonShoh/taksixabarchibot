@@ -2450,14 +2450,28 @@ async def group_info_call(call: CallbackQuery):
     toggle_action = "0" if is_act else "1"
     toggle_label = "⏸ Pauza qilish" if is_act else "🟢 Faollashtirish"
 
+    q_score = g.get("quality_score", 0.0)
+    q_emoji = g.get("quality_emoji", "⭐")
+    q_label = g.get("quality_grade_label", "O'rtacha")
+    pass_cnt = g.get("passenger_orders", 0)
+    cargo_cnt = g.get("cargo_orders", 0)
+    spam_cnt = g.get("spam_messages", 0)
+    total_seen = g.get("total_messages_seen", 0)
+    recommendation = g.get("recommendation", "")
+
     text = (
-        f"📌 <b>Guruh Ma'lumotlari</b>\n\n"
+        f"📌 <b>Guruh Ma'lumotlari & Sifat Tahlili</b>\n\n"
         f"<b>Nomi:</b> {html.escape(g.get('title') or str(gid))}\n"
         f"<b>ID:</b> <code>{gid}</code>\n"
         f"<b>Username:</b> {g.get('username') or 'Mavjud emas'}\n"
         f"<b>📍 Hudud tegi:</b> <b>{tag_display}</b>\n"
-        f"<b>Holati:</b> {status_str}\n"
-        f"<b>Jami ushlangan:</b> {g.get('total_harvested', 0)} ta e'lon\n\n"
+        f"<b>Holati:</b> {status_str}\n\n"
+        f"📊 <b>Sifat Ko'rsatkichi:</b> {q_emoji} <b>{q_score}%</b> ({q_label})\n"
+        f"• 👥 Yo'lovchilar: <b>{pass_cnt} ta</b>\n"
+        f"• 📦 Pochta buyurtmalari: <b>{cargo_cnt} ta</b>\n"
+        f"• 🛡️ Reklama / Spam: <b>{spam_cnt} ta</b>\n"
+        f"• 💬 Jami kelgan xabarlar: <b>{total_seen} ta</b>\n"
+        f"• 💡 <b>Tavsiya:</b> <i>{recommendation}</i>\n\n"
         "<i>E'lonlarda shahar ko'rsatilmaganda ushbu hudud tegi asos qilib olinadi.</i>"
     )
 
@@ -2469,6 +2483,58 @@ async def group_info_call(call: CallbackQuery):
         ],
         [InlineKeyboardButton(text="« Guruhlar ro'yxatiga qaytish", callback_data="admin_groups_list")]
     ])
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    await safe_answer(call)
+
+@router.callback_query(F.data == "admin_group_analytics")
+async def admin_group_analytics_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    analytics = await db.get_group_quality_analytics()
+    total_g = analytics.get("total_groups", 0)
+    active_g = analytics.get("active_groups", 0)
+    total_ord = analytics.get("total_orders", 0)
+    pass_ord = analytics.get("total_passenger", 0)
+    cargo_ord = analytics.get("total_cargo", 0)
+    spam_ord = analytics.get("total_spam", 0)
+    avg_q = analytics.get("avg_quality_score", 0.0)
+    spam_rate = analytics.get("spam_rate", 0.0)
+
+    top_goldmines = analytics.get("top_goldmines", [])
+    worst_spam = analytics.get("worst_spam", [])
+
+    goldmine_text = ""
+    if top_goldmines:
+        for idx, g in enumerate(top_goldmines, 1):
+            goldmine_text += f"{idx}. <b>{html.escape(g.get('title', 'Guruh'))}</b>: ⭐ <b>{g.get('quality_score')}%</b> ({g.get('total_harvested')} ta buyurtma)\n"
+    else:
+        goldmine_text = "<i>Hozircha ma'lumot yetarli emas</i>\n"
+
+    spam_text = ""
+    if worst_spam:
+        for idx, g in enumerate(worst_spam, 1):
+            spam_text += f"{idx}. <b>{html.escape(g.get('title', 'Guruh'))}</b>: 🔴 <b>{g.get('quality_score')}%</b> ({g.get('spam_messages')} ta reklama)\n"
+    else:
+        spam_text = "<i>Spam guruhlar aniqlanmadi</i>\n"
+
+    text = (
+        "📊 <b>Guruhlar Sifati va Spam Tahlili (Intelligence)</b>\n\n"
+        "Tizim monitoring qilayotgan guruhlardagi haqiqiy buyurtmalar va haydovchilar reklamasini avtomatik tahlil qiladi:\n\n"
+        f"• 👥 Monitoring guruhlari: <b>{active_g} ta faol</b> / {total_g} ta jami\n"
+        f"• 🎯 O'rtacha guruh sifati: <b>{avg_q}%</b>\n"
+        f"• 🛡️ Spam filtrlash darajasi: <b>{spam_rate}%</b> ({spam_ord} ta reklama to'xtatildi)\n"
+        f"• 📦 Real mijozlar: <b>{total_ord} ta</b> ({pass_ord} odam / {cargo_ord} pochta)\n\n"
+        f"🏆 <b>Top Eng Foydali Guruhlar (Goldmines):</b>\n{goldmine_text}\n"
+        f"⚠️ <b>Eng Ko'p Reklama/Spam Guruhlar:</b>\n{spam_text}\n"
+        "<i>Tavsiya: Sifati 5% dan past bo'lgan guruhlarni pauzaga qo'yib, server yuklamasini kamaytirishingiz mumkin.</i>"
+    )
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Guruhlar ro'yxati", callback_data="admin_groups_list")],
+        [InlineKeyboardButton(text="« Harvester panel", callback_data="admin_harvester")]
+    ])
+
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
     await safe_answer(call)

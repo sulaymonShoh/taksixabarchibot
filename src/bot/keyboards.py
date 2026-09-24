@@ -394,6 +394,7 @@ def admin_harvester_hub_kb(userbot_online: bool = False) -> InlineKeyboardMarkup
             InlineKeyboardButton(text="📥 Oxirgi buyurtmalar", callback_data="admin_recent_orders")
         ],
         [
+            InlineKeyboardButton(text="📊 Sifat tahlili", callback_data="admin_group_analytics"),
             InlineKeyboardButton(text="⚡️ Userbotni qayta ulash", callback_data="admin_reconnect_harvester")
         ],
         [InlineKeyboardButton(text="👑 Asosiy panelga qaytish", callback_data="admin_panel")]
