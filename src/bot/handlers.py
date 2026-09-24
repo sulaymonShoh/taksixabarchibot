@@ -2290,28 +2290,103 @@ async def radar_districts_clear_call(call: CallbackQuery):
     await render_radar_districts(call, user_id)
     await safe_answer(call, t("⬜️ Tumanlar filtri tozalandi", user_script))
 
-# ==================== V3 ORDER CLAIM HANDLER (STAGE 4) ====================
+# ==================== V3 ORDER CLAIM & STATUS SYNC HANDLERS ====================
 
 @router.callback_query(F.data.startswith("claim_order_"))
 async def claim_order_call(call: CallbackQuery):
     user_id = call.from_user.id
-    order_id = call.data.replace("claim_order_", "")
+    order_id_raw = call.data.replace("claim_order_", "")
     user = await db.get_user(user_id)
     _, is_vip = check_subscription(user.get("subscription_expiry") if user else None)
     if not is_vip:
         await safe_answer(call, "⚠️ Buyurtmani qabul qilish uchun VIP obuna kerak!", show_alert=True)
         return
 
-    await safe_answer(call, "✅ Buyurtma qabul qilindi! Mijoz bilan zudlik bilan bog'laning.", show_alert=True)
-    with contextlib.suppress(TelegramBadRequest):
-        current_text = call.message.html_text or call.message.text or ""
-        claimed_banner = "\n\n<b>✅ SIZ BU BUYURTMANI QABUL QILDINGIZ!</b>\n<i>Mijoz bilan bog'laning.</i>"
-        if "SIZ BU BUYURTMANI QABUL QILDINGIZ" not in current_text:
-            new_text = current_text + claimed_banner
-            new_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Qabul qilingan", callback_data="noop")]
-            ])
-            await call.message.edit_text(new_text, reply_markup=new_kb, parse_mode="HTML")
+    try:
+        oid = int(order_id_raw)
+    except ValueError:
+        oid = 0
+
+    from src.harvester.dispatcher import default_dispatcher
+    if not default_dispatcher.bot and call.bot:
+        default_dispatcher.bot = call.bot
+
+    result = await db.claim_harvested_order(oid, user_id)
+    if result["success"]:
+        await safe_answer(call, "✅ Buyurtma qabul qilindi! Mijoz bilan zudlik bilan bog'laning.", show_alert=True)
+        # Edit claiming driver's card immediately for 0ms visual responsiveness
+        with contextlib.suppress(TelegramBadRequest):
+            current_text = call.message.html_text or call.message.text or ""
+            claimed_banner = "\n\n<b>✅ SIZ BU BUYURTMANI QABUL QILDINGIZ!</b>\n<i>Mijoz bilan bog'laning.</i>"
+            if "SIZ BU BUYURTMANI QABUL QILDINGIZ" not in current_text:
+                new_text = current_text + claimed_banner
+                new_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Qabul qilingan", callback_data="noop")]
+                ])
+                await call.message.edit_text(new_text, reply_markup=new_kb, parse_mode="HTML")
+        # Synchronize all other driver messages in the background
+        if oid > 0:
+            asyncio.create_task(default_dispatcher.sync_order_status(oid, "CLAIMED", user_id))
+    else:
+        status = result.get("status")
+        if status == "CLAIMED":
+            await safe_answer(call, "⚠️ Kechirasiz! Bu buyurtmani boshqa haydovchi olib bo'ldi.", show_alert=True)
+            with contextlib.suppress(TelegramBadRequest):
+                current_text = call.message.html_text or call.message.text or ""
+                locked_banner = "\n\n<b>🔒 BAND QILINDI</b>\n<i>Ushbu buyurtma boshqa haydovchi tomonidan olindi.</i>"
+                if "BAND QILINDI" not in current_text:
+                    new_kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="🔒 Band qilindi", callback_data="noop")]
+                    ])
+                    await call.message.edit_text(current_text + locked_banner, reply_markup=new_kb, parse_mode="HTML")
+        elif status == "TAKEN_ELSEWHERE":
+            await safe_answer(call, "ℹ️ Bu buyurtma bekor qilingan (mijoz allaqachon boshqa transport topgan).", show_alert=True)
+            with contextlib.suppress(TelegramBadRequest):
+                current_text = call.message.html_text or call.message.text or ""
+                dead_banner = "\n\n<b>❌ BEKOR QILINDI</b>\n<i>Mijoz allaqachon boshqa transport topgan.</i>"
+                if "BEKOR QILINDI" not in current_text:
+                    new_kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="❌ Taksi topilgan", callback_data="noop")]
+                    ])
+                    await call.message.edit_text(current_text + dead_banner, reply_markup=new_kb, parse_mode="HTML")
+        else:
+            await safe_answer(call, "⚠️ Buyurtma topilmadi yoki muddati tugagan.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("dead_order_"))
+async def dead_order_call(call: CallbackQuery):
+    user_id = call.from_user.id
+    order_id_raw = call.data.replace("dead_order_", "")
+    user = await db.get_user(user_id)
+    _, is_vip = check_subscription(user.get("subscription_expiry") if user else None)
+    if not is_vip:
+        await safe_answer(call, "⚠️ VIP obuna talab etiladi!", show_alert=True)
+        return
+
+    try:
+        oid = int(order_id_raw)
+    except ValueError:
+        oid = 0
+
+    from src.harvester.dispatcher import default_dispatcher
+    if not default_dispatcher.bot and call.bot:
+        default_dispatcher.bot = call.bot
+
+    result = await db.report_dead_order(oid, user_id)
+    if result["success"]:
+        await safe_answer(call, "Rahmat! Buyurtma bekor qilingan deb belgilandi.", show_alert=True)
+        with contextlib.suppress(TelegramBadRequest):
+            current_text = call.message.html_text or call.message.text or ""
+            dead_banner = "\n\n<b>❌ BEKOR QILINDI</b>\n<i>Siz mijoz allaqachon taksi topgan deb belgiladingiz.</i>"
+            if "BEKOR QILINDI" not in current_text:
+                new_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="❌ Taksi topilgan", callback_data="noop")]
+                ])
+                await call.message.edit_text(current_text + dead_banner, reply_markup=new_kb, parse_mode="HTML")
+        if oid > 0:
+            asyncio.create_task(default_dispatcher.sync_order_status(oid, "TAKEN_ELSEWHERE", user_id))
+    else:
+        await safe_answer(call, "ℹ️ Ushbu buyurtma holati allaqachon o'zgargan.", show_alert=True)
 
 
 # ==================== SUPERADMIN HARVESTER & PANEL HANDLERS ====================

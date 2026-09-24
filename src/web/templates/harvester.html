@@ -281,6 +281,7 @@
                 <thead class="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase border-b border-slate-200 dark:border-slate-800">
                     <tr>
                         <th class="px-4 py-3">ID / Vaqt</th>
+                        <th class="px-4 py-3">Holat</th>
                         <th class="px-4 py-3">Turi</th>
                         <th class="px-4 py-3">Yo'nalish</th>
                         <th class="px-4 py-3">Mijoz / Aloqa</th>
@@ -294,6 +295,21 @@
                         <td class="px-4 py-3 whitespace-nowrap">
                             <span class="font-mono font-bold text-slate-900 dark:text-white">#{{ o.id }}</span>
                             <div class="text-[11px] text-slate-400">{{ o.created_at }}</div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            {% if o.status == 'CLAIMED' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" title="Haydovchi #{{ o.claimed_by }} tomonidan olingan">
+                                <i class="fa-solid fa-lock mr-1 text-[10px]"></i> Band qilindi
+                            </span>
+                            {% elif o.status == 'TAKEN_ELSEWHERE' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20" title="Mijoz allaqachon boshqa taksi topgan">
+                                <i class="fa-solid fa-xmark mr-1 text-[10px]"></i> Taksi topilgan
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                                <i class="fa-solid fa-bolt mr-1 text-[10px]"></i> Faol (Ochiq)
+                            </span>
+                            {% endif %}
                         </td>
                         <td class="px-4 py-3 whitespace-nowrap">
                             {% if o.order_type == 'PASSENGER' %}
@@ -333,7 +349,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="6" class="px-4 py-8 text-center text-slate-400 italic">
+                        <td colspan="7" class="px-4 py-8 text-center text-slate-400 italic">
                             Hozircha buyurtmalar oqimi mavjud emas. Superguruhlar ulangach, buyurtmalar bu yerda jonli paydo bo'ladi.
                         </td>
                     </tr>

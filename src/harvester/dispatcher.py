@@ -38,11 +38,11 @@ def mask_telegram_username(username: Optional[str]) -> str:
         return ""
     return "@••••••"
 
-def mask_raw_text(text: str) -> str:
+def mask_raw_text(text: str, placeholder: str = "[VIP raqam yashirilgan]") -> str:
     """Replaces phone numbers in raw client text with masked placeholders."""
     return re.sub(
         r"(\+?998[\s\-]?)?\d{2}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}",
-        "[VIP raqam yashirilgan]",
+        placeholder,
         text
     )
 
@@ -59,8 +59,12 @@ def build_order_action_keyboard(
 
     if is_vip:
         claim_text = "⚡️ Буюртмани олиш (Банд қилиш)" if script == "cyr" else "⚡️ Buyurtmani olish (Band qilish)"
+        dead_text = "❌ Мижоз такси топган" if script == "cyr" else "❌ Mijoz taksi topgan"
         keyboard.append([
             InlineKeyboardButton(text=claim_text, callback_data=f"claim_order_{order_id}")
+        ])
+        keyboard.append([
+            InlineKeyboardButton(text=dead_text, callback_data=f"dead_order_{order_id}")
         ])
     else:
         # Paywall Teaser Keyboard -> Direct 1-tap conversion button
@@ -75,6 +79,25 @@ def build_order_action_keyboard(
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def build_order_claimed_keyboard(script: str = "lat") -> InlineKeyboardMarkup:
+    """Keyboard for the winning driver who successfully claimed the order."""
+    text = "✅ Қабул қилинган" if script == "cyr" else "✅ Qabul qilingan"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=text, callback_data="noop")]
+    ])
+
+
+def build_order_locked_keyboard(status: str = "CLAIMED", script: str = "lat") -> InlineKeyboardMarkup:
+    """Keyboard for other drivers when an order is claimed or marked taken elsewhere."""
+    if status == "TAKEN_ELSEWHERE":
+        text = "❌ Такси топилган" if script == "cyr" else "❌ Taksi topilgan"
+    else:
+        text = "🔒 Банд қилинди" if script == "cyr" else "🔒 Band qilindi"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=text, callback_data="noop")]
+    ])
 
 
 class OrderDispatcher:
@@ -148,7 +171,7 @@ class OrderDispatcher:
             if is_vip:
                 text = self.format_vip_notification(order, match_meta, script=script)
                 kb_markup = build_order_action_keyboard(order_id, username, is_vip=True, message_link=message_link, script=script)
-                await self.bot.send_message(
+                sent_msg = await self.bot.send_message(
                     chat_id=driver_id,
                     text=text,
                     reply_markup=kb_markup,
@@ -156,6 +179,12 @@ class OrderDispatcher:
                     disable_notification=not sound_alert
                 )
                 self._total_vip_dispatched += 1
+                msg_id = getattr(sent_msg, "message_id", None) or (sent_msg.get("message_id") or sent_msg.get("id") if isinstance(sent_msg, dict) else None)
+                if order_id and order_id > 0 and msg_id:
+                    try:
+                        await db.record_order_dispatch(order_id, driver_id, msg_id, is_vip=True)
+                    except Exception as d_err:
+                        logger.debug(f"Failed to record dispatch: {d_err}")
                 return True
             else:
                 # Teaser check: rate limit
@@ -173,7 +202,7 @@ class OrderDispatcher:
                     script=script,
                     can_claim_trial=can_trial
                 )
-                await self.bot.send_message(
+                sent_msg = await self.bot.send_message(
                     chat_id=driver_id,
                     text=text,
                     reply_markup=kb_markup,
@@ -182,6 +211,12 @@ class OrderDispatcher:
                 )
                 self._teaser_last_sent[driver_id] = now
                 self._total_teasers_dispatched += 1
+                msg_id = getattr(sent_msg, "message_id", None) or (sent_msg.get("message_id") or sent_msg.get("id") if isinstance(sent_msg, dict) else None)
+                if order_id and order_id > 0 and msg_id:
+                    try:
+                        await db.record_order_dispatch(order_id, driver_id, msg_id, is_vip=False)
+                    except Exception as d_err:
+                        logger.debug(f"Failed to record dispatch: {d_err}")
                 return True
 
         except (TelegramForbiddenError, TelegramBadRequest) as e:
@@ -241,6 +276,102 @@ class OrderDispatcher:
             "sent_count": successful_sends,
             "duration_ms": duration_ms
         }
+
+    async def sync_order_status(
+        self,
+        order_id: int,
+        status: str,
+        claimer_id: int,
+        claimer_name: Optional[str] = None
+    ) -> int:
+        """
+        Synchronizes order status in real-time across all drivers who received the alert.
+        - The claimer's message is updated to confirmed '✅ SIZ BAND QILDINGIZ'.
+        - Other drivers' messages are updated to locked '🔒 BAND QILINDI' or '❌ BEKOR QILINDI'.
+        """
+        if not self.bot:
+            logger.warning("No bot instance configured for OrderDispatcher.")
+            return 0
+
+        dispatches = await db.get_order_dispatches(order_id)
+        if not dispatches:
+            return 0
+
+        order = await db.get_harvested_order(order_id)
+
+        async def _edit_single(dispatch: Dict[str, Any]):
+            driver_id = dispatch["driver_id"]
+            msg_id = dispatch["message_id"]
+            is_winner = (driver_id == claimer_id)
+            driver_script = "lat"
+            try:
+                driver_script = await db.get_user_script(driver_id)
+            except Exception:
+                pass
+
+            if is_winner:
+                if status == "CLAIMED":
+                    banner = (
+                        "\n\n<b>✅ СИЗ БУ БУЮРТМАНИ БАНД ҚИЛДИНГИЗ!</b>\n<i>Мижоз билан келишилди. Оқ йўл!</i>"
+                        if driver_script == "cyr" else
+                        "\n\n<b>✅ SIZ BU BUYURTMANI BAND QILDINGIZ!</b>\n<i>Mijoz bilan kelishildi. Oq yo'l!</i>"
+                    )
+                    kb = build_order_claimed_keyboard(script=driver_script)
+                else:
+                    banner = (
+                        "\n\n<b>❌ БЕКОР ҚИЛИНДИ</b>\n<i>Сиз мижоз бошқа такси топган деб белгиладингиз.</i>"
+                        if driver_script == "cyr" else
+                        "\n\n<b>❌ BEKOR QILINDI</b>\n<i>Siz mijoz boshqa taksi topgan deb belgiladingiz.</i>"
+                    )
+                    kb = build_order_locked_keyboard(status=status, script=driver_script)
+            else:
+                if status == "CLAIMED":
+                    banner = (
+                        "\n\n<b>🔒 БАНД ҚИЛИНДИ</b>\n<i>Ушбу буюртма бошқа ҳайдовчи томонидан олинди.</i>"
+                        if driver_script == "cyr" else
+                        "\n\n<b>🔒 BAND QILINDI</b>\n<i>Ushbu buyurtma boshqa haydovchi tomonidan olindi.</i>"
+                    )
+                else:
+                    banner = (
+                        "\n\n<b>❌ БЕКОР ҚИЛИНДИ</b>\n<i>Мижоз аллақачон бошқа транспорт топган.</i>"
+                        if driver_script == "cyr" else
+                        "\n\n<b>❌ BEKOR QILINDI</b>\n<i>Mijoz allaqachon boshqa transport topgan.</i>"
+                    )
+                kb = build_order_locked_keyboard(status=status, script=driver_script)
+
+            try:
+                if order:
+                    if not is_winner and status == "CLAIMED":
+                        order_copy = dict(order)
+                        order_copy["phone_number"] = "[Band qilingan]"
+                        order_copy["telegram_username"] = ""
+                        if order_copy.get("raw_text"):
+                            order_copy["raw_text"] = mask_raw_text(order_copy["raw_text"], "[Band qilingan]")
+                        base_text = self.matcher.format_notification(order_copy, {}, script=driver_script)
+                    else:
+                        base_text = self.matcher.format_notification(order, {}, script=driver_script)
+                else:
+                    base_text = "<b>Taksi Xabarchi Buyurtmasi</b>"
+
+                new_text = base_text + banner
+                await self.bot.edit_message_text(
+                    chat_id=driver_id,
+                    message_id=msg_id,
+                    text=new_text,
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+                return True
+            except (TelegramBadRequest, TelegramForbiddenError):
+                return False
+            except Exception as e:
+                logger.debug(f"Could not edit message for driver #{driver_id}: {e}")
+                return False
+
+        results = await asyncio.gather(*[_edit_single(d) for d in dispatches], return_exceptions=True)
+        synced = sum(1 for r in results if r is True)
+        logger.info(f"Synchronized order #{order_id} ({status}) across {synced}/{len(dispatches)} driver cards.")
+        return synced
 
 
 # Singleton dispatcher instance

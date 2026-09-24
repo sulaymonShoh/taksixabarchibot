@@ -205,9 +205,37 @@ async def init_db():
                 phone_number TEXT,
                 telegram_username TEXT,
                 message_hash TEXT UNIQUE,
+                status TEXT DEFAULT 'ACTIVE',
+                claimed_by BIGINT DEFAULT NULL,
+                claimed_at TIMESTAMP DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # Auto-migrate harvested_orders columns if missing
+        async with db.execute("PRAGMA table_info(harvested_orders)") as cursor:
+            ho_columns = [row[1] for row in await cursor.fetchall()]
+            if 'status' not in ho_columns:
+                await db.execute("ALTER TABLE harvested_orders ADD COLUMN status TEXT DEFAULT 'ACTIVE'")
+            if 'claimed_by' not in ho_columns:
+                await db.execute("ALTER TABLE harvested_orders ADD COLUMN claimed_by BIGINT DEFAULT NULL")
+            if 'claimed_at' not in ho_columns:
+                await db.execute("ALTER TABLE harvested_orders ADD COLUMN claimed_at TIMESTAMP DEFAULT NULL")
+
+        # Harvested order dispatches (tracking sent messages for real-time claim sync)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS harvested_order_dispatches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                driver_id BIGINT NOT NULL,
+                message_id BIGINT NOT NULL,
+                is_vip BOOLEAN DEFAULT 1,
+                dispatched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (order_id) REFERENCES harvested_orders(id)
+            )
+        ''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_order_dispatches_order_id ON harvested_order_dispatches(order_id)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_order_dispatches_driver ON harvested_order_dispatches(driver_id, order_id)')
 
         # Driver radar preferences (Stage 3)
         await db.execute('''
@@ -1145,6 +1173,143 @@ async def get_recent_harvested_orders(limit: int = 50, region: Optional[str] = N
         params.append(limit)
 
         async with db.execute(sql, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+async def get_harvested_order(order_id: int) -> Optional[Dict[str, Any]]:
+    """Retrieves a single harvested order by ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('SELECT * FROM harvested_orders WHERE id = ?', (order_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+async def claim_harvested_order(order_id: int, driver_id: int) -> Dict[str, Any]:
+    """
+    Atomically claims an active order for the specified driver.
+    Prevents race conditions where multiple drivers claim the same lead simultaneously.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Atomic conditional update
+        cursor = await db.execute(
+            """
+            UPDATE harvested_orders
+            SET status = 'CLAIMED', claimed_by = ?, claimed_at = ?
+            WHERE id = ? AND (status IS NULL OR status = 'ACTIVE')
+            """,
+            (driver_id, now_str, order_id)
+        )
+        await db.commit()
+
+        if cursor.rowcount > 0:
+            async with db.execute('SELECT * FROM harvested_orders WHERE id = ?', (order_id,)) as c:
+                row = await c.fetchone()
+                order_dict = dict(row) if row else {}
+            return {
+                "success": True,
+                "status": "CLAIMED",
+                "claimed_by": driver_id,
+                "claimed_at": now_str,
+                "order": order_dict
+            }
+        else:
+            async with db.execute('SELECT * FROM harvested_orders WHERE id = ?', (order_id,)) as c:
+                row = await c.fetchone()
+                if not row:
+                    return {"success": False, "status": "NOT_FOUND", "claimed_by": None, "order": {}}
+                order_dict = dict(row)
+                return {
+                    "success": False,
+                    "status": order_dict.get("status", "CLAIMED"),
+                    "claimed_by": order_dict.get("claimed_by"),
+                    "claimed_at": order_dict.get("claimed_at"),
+                    "order": order_dict
+                }
+
+async def report_dead_order(order_id: int, driver_id: int) -> Dict[str, Any]:
+    """
+    Atomically marks an active order as TAKEN_ELSEWHERE (dead lead reported by a driver),
+    so that all other drivers are notified and don't waste time calling the customer.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+        cursor = await db.execute(
+            """
+            UPDATE harvested_orders
+            SET status = 'TAKEN_ELSEWHERE', claimed_by = ?, claimed_at = ?
+            WHERE id = ? AND (status IS NULL OR status = 'ACTIVE')
+            """,
+            (driver_id, now_str, order_id)
+        )
+        await db.commit()
+
+        if cursor.rowcount > 0:
+            async with db.execute('SELECT * FROM harvested_orders WHERE id = ?', (order_id,)) as c:
+                row = await c.fetchone()
+                order_dict = dict(row) if row else {}
+            return {
+                "success": True,
+                "status": "TAKEN_ELSEWHERE",
+                "claimed_by": driver_id,
+                "claimed_at": now_str,
+                "order": order_dict
+            }
+        else:
+            async with db.execute('SELECT * FROM harvested_orders WHERE id = ?', (order_id,)) as c:
+                row = await c.fetchone()
+                if not row:
+                    return {"success": False, "status": "NOT_FOUND", "claimed_by": None, "order": {}}
+                order_dict = dict(row)
+                return {
+                    "success": False,
+                    "status": order_dict.get("status", "CLAIMED"),
+                    "claimed_by": order_dict.get("claimed_by"),
+                    "order": order_dict
+                }
+
+async def record_order_dispatch(order_id: int, driver_id: int, message_id: int, is_vip: bool = True):
+    """Logs an order alert dispatch to a driver for real-time status synchronization."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO harvested_order_dispatches (order_id, driver_id, message_id, is_vip)
+            VALUES (?, ?, ?, ?)
+            """,
+            (order_id, driver_id, message_id, 1 if is_vip else 0)
+        )
+        await db.commit()
+
+async def record_order_dispatches_batch(dispatches: List[Dict[str, Any]]):
+    """Batch-logs order dispatches."""
+    if not dispatches:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        records = [
+            (d["order_id"], d["driver_id"], d["message_id"], 1 if d.get("is_vip", True) else 0)
+            for d in dispatches
+        ]
+        await db.executemany(
+            """
+            INSERT INTO harvested_order_dispatches (order_id, driver_id, message_id, is_vip)
+            VALUES (?, ?, ?, ?)
+            """,
+            records
+        )
+        await db.commit()
+
+async def get_order_dispatches(order_id: int) -> List[Dict[str, Any]]:
+    """Retrieves all dispatch records for an order."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            'SELECT * FROM harvested_order_dispatches WHERE order_id = ?',
+            (order_id,)
+        ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
