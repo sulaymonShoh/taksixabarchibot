@@ -495,7 +495,9 @@
             if (data.success) {
                 window.location.reload();
             } else {
-                alert('Qayta ulanish natijasi: ' + (data.status ? data.status.status : 'Muvaffaqiyatsiz'));
+                const statusStr = data.status ? data.status.status : 'Muvaffaqiyatsiz';
+                const errDetail = data.status && data.status.last_error ? `\n\nSabab: ${data.status.last_error}` : '';
+                alert(`Qayta ulanish natijasi: ${statusStr}${errDetail}`);
                 window.location.reload();
             }
         } catch (err) {

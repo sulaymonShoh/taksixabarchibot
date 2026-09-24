@@ -35,6 +35,7 @@ class HarvesterService:
         # Watchdog & Supervisor telemetry
         self._status: str = "IDLE"  # "ONLINE", "RECONNECTING", "OFFLINE", "ERROR", "IDLE"
         self._watchdog_task: Optional[asyncio.Task] = None
+        self._watchdog_active: bool = False
         self._watchdog_interval: int = 20  # seconds between health checks
         self._consecutive_failures: int = 0
         self._last_heartbeat: Optional[datetime] = None
@@ -52,8 +53,8 @@ class HarvesterService:
 
     async def start(self) -> bool:
         """Connects the userbot client, starts the real-time HarvesterListener and watchdog."""
+        self.start_watchdog()
         if self.is_connected():
-            self.start_watchdog()
             return True
 
         if not self.is_session_available():
@@ -125,12 +126,14 @@ class HarvesterService:
 
     def start_watchdog(self):
         """Starts background supervisor watchdog if not already running."""
+        self._watchdog_active = True
         if self._watchdog_task is None or self._watchdog_task.done():
             self._watchdog_task = asyncio.create_task(self._watchdog_loop())
             logger.info("Harvester watchdog supervisor started.")
 
     def stop_watchdog(self):
         """Cancels background supervisor watchdog."""
+        self._watchdog_active = False
         if self._watchdog_task and not self._watchdog_task.done():
             self._watchdog_task.cancel()
             self._watchdog_task = None
@@ -142,14 +145,15 @@ class HarvesterService:
         Triggers auto-reconnection if the client socket drops or listener stops.
         Alerts SuperAdmin on repeated persistent failures.
         """
-        while self._is_running:
+        while self._watchdog_active:
             try:
                 await asyncio.sleep(self._watchdog_interval)
-                if not self._is_running:
+                if not self._watchdog_active:
                     break
 
                 if not self.is_session_available():
                     self._status = "OFFLINE"
+                    self._last_error = "Session file not found"
                     self._consecutive_failures += 1
                     continue
 
@@ -209,6 +213,7 @@ class HarvesterService:
             if self.client:
                 with contextlib.suppress(Exception):
                     await self.client.disconnect()
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.debug(f"Error during harvester client cleanup: {e}")
         finally:
