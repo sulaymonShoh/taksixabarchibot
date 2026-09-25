@@ -118,9 +118,23 @@ class HarvesterService:
             self.start_watchdog()
             return True
         except Exception as e:
-            self._status = "ERROR"
-            self._last_error = str(e)
-            logger.error(f"Failed to start HarvesterService: {e}", exc_info=True)
+            err_type = type(e).__name__
+            if "AuthKeyDuplicated" in err_type or "AuthKeyUnregistered" in err_type:
+                logger.warning(
+                    f"Telegram permanently revoked the session key ({err_type}). "
+                    f"This occurs when the same .session file is connected from server and local simultaneously. "
+                    f"Removing dead session file '{self.session_path}.session'."
+                )
+                session_file = f"{self.session_path}.session"
+                if os.path.exists(session_file):
+                    with contextlib.suppress(Exception):
+                        os.remove(session_file)
+                self._status = "OFFLINE"
+                self._last_error = f"Session revoked ({err_type}). Please run: python scripts/login_harvester.py"
+            else:
+                self._status = "ERROR"
+                self._last_error = str(e)
+            logger.error(f"Failed to start HarvesterService: {e}")
             self._is_running = False
             return False
 

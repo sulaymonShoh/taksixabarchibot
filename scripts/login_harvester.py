@@ -6,6 +6,7 @@ and creates 'sessions/harvester.session'.
 import os
 import sys
 import asyncio
+import contextlib
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath("."))
@@ -26,8 +27,20 @@ async def main():
     os.makedirs(SESSIONS_DIR, exist_ok=True)
     session_path = os.path.join(SESSIONS_DIR, HARVESTER_SESSION_NAME)
     
+    session_file = f"{session_path}.session"
     client = TelegramClient(session_path, API_ID, API_HASH)
-    await client.connect()
+    try:
+        await client.connect()
+    except Exception as e:
+        print(f"⚠️ Eski sessiya faylida xatolik aniqlandi ({e}).")
+        print("Sessiya yangidan boshlanishi uchun tozalanmoqda...\n")
+        with contextlib.suppress(Exception):
+            await client.disconnect()
+        if os.path.exists(session_file):
+            with contextlib.suppress(Exception):
+                os.remove(session_file)
+        client = TelegramClient(session_path, API_ID, API_HASH)
+        await client.connect()
 
     if await client.is_user_authorized():
         me = await client.get_me()
