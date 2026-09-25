@@ -58,7 +58,8 @@ DRIVER_AD_PHRASES = frozenset([
     "odam kam", "kishi kam", "joy kam", "yo'lovchi kam", "yolovchi kam", "kam odam", "kam kishi",
     "kamdamiz", "kamdamz", "kamdamiza", "kamimiz", "kamimiz bor",
     "oldi bosh", "oldi bo'sh", "oldi bush", "oldida joy bor", "oldi mesta bosh", "oldi mesta bo'sh", "mesta bosh", "mesta bo'sh", "mesta pustoy",
-    "xarkatamiz", "xarakattamiz", "xarakaddamz", "xarakatdamiz", "harakatdamiz",
+    "xarkatamiz", "xarakattamiz", "xarakaddamz", "xarakatdamiz", "harakatdamiz", "xarakatamiz", "harakatamiz", "xarkatdamiz", "xarkatamz",
+    "olib ketamiz", "ob ketamiz", "olib ketaman", "ob ketaman", "olib ketamz", "ob ketamz",
     "ael kishi bor", "ael bor",
     "pokiza salon", "toza salon",
     "etkazib berish xizmati", "yetkazib berish xizmati",
@@ -111,8 +112,12 @@ DRIVER_AD_REGEXES: List[Pattern] = [
     re.compile(r"\b(?:pochta|puchta|dostavka|taksi|taxi)\s*xizmat(?:i|lari)?\b", re.IGNORECASE),
     re.compile(r"\b(?:bisnes|biznes)\s*klass?\b", re.IGNORECASE),
     re.compile(r"\b(?:har|xar)\s*kuni\s*xizmat\b", re.IGNORECASE),
-    # Driver taking passengers/cargo: "odam pochtalar bo'lsa olamiz", "pochta olamz", "pchta olamiz", "pochta bolsa olmiz"
-    re.compile(r"\b(?:odam|kishi|yo'lovchi|yolovchi|pochta|pchta|puchta|yuk)\w*(?:\s+(?:odam|kishi|yo'lovchi|yolovchi|pochta|pchta|puchta|yuk)\w*)*\s*(?:bo'lsa|bolsa|bulsa|bosa|ham|xam)?\s*(?:olamiz|olmiz|olamz|olamiza|olvolamiz|olvolamz|ovolamiz|ovomiz|obketamiz|olibketamiz|obketamz|olaman|olman|ovolaman|olvolaman|obketaman|olibketaman)\b", re.IGNORECASE),
+    # Driver on the move / departure pitches (harakatdamiz, xarakatamiz, harkatdamiz)
+    re.compile(r"\b[hx]ar[a]?ka[td]{1,2}(?:a|da|ta)?(?:miz|mz|miza)\b", re.IGNORECASE),
+    # Driver taking passengers/cargo: "odam pochtalar bo'lsa olamiz", "pochta olamz", "pchta olamiz", "pochta bolsa olmiz", "odam pochta bolsa olib ketamiz"
+    re.compile(r"\b(?:odam|kishi|yo'lovchi|yolovchi|pochta|pchta|puchta|yuk)\w*(?:\s+(?:odam|kishi|yo'lovchi|yolovchi|pochta|pchta|puchta|yuk)\w*)*\s*(?:bo'lsa|bolsa|bulsa|bosa|ham|xam)?\s*(?:olamiz|olmiz|olamz|olamiza|olvolamiz|olvolamz|ovolamiz|ovomiz|olaman|olman|ovolaman|olvolaman|obketaman|olibketaman|obketamiz|olibketamiz|obketamz|(?:olib|ob)\s*ket(?:am|m)?(?:iz|z|an)|(?:olib|ob)\s*chiq(?:am|m)?(?:iz|z|an))\b", re.IGNORECASE),
+    re.compile(r"\b(?:bo'lsa|bolsa|bulsa|bosa)\s*(?:olib|ob)\s*ket(?:am|m)?(?:iz|z|an)\b", re.IGNORECASE),
+    re.compile(r"\b(?:olib|ob)\s*ketamiz\b", re.IGNORECASE),
     # Driver front seat vacant (excluding passenger asking "kimni oldi bo'sh")
     re.compile(r"(?<!kimni\s)\b(?:oldi|aldi)\s*(?:mesta|mesto|o'rindiq|orindiq|joy|sidenya|sedad)?\s*(?:bo'sh|bosh|bush|pustoy)\b", re.IGNORECASE),
     re.compile(r"\b(?:mesta|mesto|o'rindiq|orindiq|sidenya)\s*(?:bo'sh|bosh|bush|pustoy)\b", re.IGNORECASE),
