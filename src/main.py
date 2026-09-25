@@ -43,11 +43,18 @@ async def main():
     web_app.state.harvester_service = default_harvester_service
     asyncio.create_task(default_harvester_service.start())
 
-    # 5. Attach dependencies to FastAPI web state
+    # 5. Initialize VIP Expiration Reminder Scheduler
+    from src.worker.reminder_scheduler import SubscriptionReminderScheduler
+    reminder_scheduler = SubscriptionReminderScheduler(bot)
+    bot.reminder_scheduler = reminder_scheduler
+    web_app.state.reminder_scheduler = reminder_scheduler
+    reminder_scheduler.start()
+
+    # 6. Attach dependencies to FastAPI web state
     web_app.state.bot = bot
     web_app.state.worker_manager = worker_manager
     
-    # 6. Configure Uvicorn Web Server
+    # 7. Configure Uvicorn Web Server
     uvicorn_config = uvicorn.Config(
         app=web_app,
         host=WEB_HOST,
@@ -59,7 +66,7 @@ async def main():
     
     logger.info(f"Web Admin & Mini App server configured on http://{WEB_HOST}:{WEB_PORT}")
     
-    # 7. Run Bot Polling and Web Server Concurrently
+    # 8. Run Bot Polling and Web Server Concurrently
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         logger.info("Bot polling and Web server starting...")
@@ -72,6 +79,7 @@ async def main():
         pass
     finally:
         logger.info("Gracefully shutting down Taksi Xabarchi services...")
+        reminder_scheduler.stop()
         await default_harvester_service.stop()
         await worker_manager.stop_all()
         uvicorn_server.should_exit = True

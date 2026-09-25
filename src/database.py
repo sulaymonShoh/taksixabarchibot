@@ -237,6 +237,20 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_order_dispatches_order_id ON harvested_order_dispatches(order_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_order_dispatches_driver ON harvested_order_dispatches(driver_id, order_id)')
 
+        # VIP subscription expiration reminders audit log (anti-duplicate / idempotency)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS subscription_reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id BIGINT NOT NULL,
+                reminder_type TEXT NOT NULL,
+                expiry_date TEXT NOT NULL,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, reminder_type, expiry_date),
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        ''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_sub_reminders_lookup ON subscription_reminders(user_id, expiry_date)')
+
         # Driver radar preferences (Stage 3)
         await db.execute('''
             CREATE TABLE IF NOT EXISTS driver_radar_preferences (
@@ -354,6 +368,60 @@ async def can_user_claim_trial(user_id: int) -> bool:
         except Exception:
             pass
     return True
+
+async def record_subscription_reminder(user_id: int, reminder_type: str, expiry_date: str) -> bool:
+    """Records a dispatched expiration reminder to guarantee idempotency and zero duplicate messages."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute(
+                """
+                INSERT INTO subscription_reminders (user_id, reminder_type, expiry_date)
+                VALUES (?, ?, ?)
+                """,
+                (user_id, reminder_type, expiry_date)
+            )
+            await db.commit()
+            return True
+        except aiosqlite.IntegrityError:
+            return False
+
+async def has_subscription_reminder_been_sent(user_id: int, reminder_type: str, expiry_date: str) -> bool:
+    """Checks whether a specific reminder has already been sent for the given expiry cycle."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT 1 FROM subscription_reminders
+            WHERE user_id = ? AND reminder_type = ? AND expiry_date = ?
+            """,
+            (user_id, reminder_type, expiry_date)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row is not None
+
+async def get_active_subscribed_users() -> List[Dict[str, Any]]:
+    """Retrieves all active users with a set subscription_expiry for reminder evaluation."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT user_id, full_name, username, phone_number,
+                   subscription_expiry, is_lifetime_discount, script, has_used_trial
+            FROM users
+            WHERE subscription_expiry IS NOT NULL
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+async def has_user_ever_purchased(user_id: int) -> bool:
+    """Returns True if the user has at least one approved payment."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM payment_requests WHERE user_id = ? AND status = 'APPROVED'",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row is not None
 
 async def get_user(user_id: int) -> Optional[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
