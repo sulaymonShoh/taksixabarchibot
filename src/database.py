@@ -739,6 +739,42 @@ async def set_global_setting(key: str, value: Any):
         )
         await db.commit()
 
+async def get_order_pool_chat_id() -> Optional[int]:
+    """Retrieves configured Order Pool Group Chat ID from DB or config fallback."""
+    val = await get_global_setting("order_pool_chat_id")
+    if val:
+        try:
+            cid = int(val)
+            if cid != 0:
+                return cid
+        except (ValueError, TypeError):
+            pass
+    from src.config import ORDER_POOL_CHAT_ID
+    return ORDER_POOL_CHAT_ID if ORDER_POOL_CHAT_ID else None
+
+async def set_order_pool_chat_id(chat_id: Optional[int]):
+    """Stores the Order Pool Group Chat ID in persistent global settings."""
+    await set_global_setting("order_pool_chat_id", int(chat_id) if chat_id else 0)
+
+async def get_recently_expired_users(hours: int = 48) -> List[Dict[str, Any]]:
+    """Retrieves users whose VIP subscription expired recently (for group access cleanup)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        now = datetime.utcnow()
+        cutoff = (now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        async with db.execute(
+            """
+            SELECT * FROM users
+            WHERE subscription_expiry IS NOT NULL
+              AND subscription_expiry < ?
+              AND subscription_expiry >= ?
+            """,
+            (now_str, cutoff)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
 # ==================== CAMPAIGN DISCOUNTS ====================
 async def get_active_campaign_discount() -> Optional[Dict[str, Any]]:
     """Returns currently active campaign discount if within duration and active."""

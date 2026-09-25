@@ -49,15 +49,18 @@ class MockBot:
         text: str,
         reply_markup=None,
         parse_mode: str = "HTML",
-        disable_notification: bool = False
+        disable_notification: bool = False,
+        **kwargs
     ):
         msg = {
+            "message_id": len(self.sent_messages) + 1,
             "chat_id": chat_id,
             "text": text,
             "reply_markup": reply_markup,
             "parse_mode": parse_mode,
             "disable_notification": disable_notification,
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            **kwargs
         }
         self.sent_messages.append(msg)
         return msg
@@ -261,9 +264,42 @@ async def run_phase4_async_tests():
     assert bench_dur_ms < 500, f"Dispatch too slow: {bench_dur_ms}ms"
     print("   [PASS] Performance verified: Sub-second dispatch (< 500ms target, actual: under 50ms in-memory).")
 
+    # ==================== 8. ORDER POOL GROUP DISPATCH (ANTI-SHARING) ====================
+    print("\n>>> 8. Testing Order Pool Group Dispatch with Anti-Sharing Security...")
+    order_pool_group_id = -1009988776655
+    await db.set_order_pool_chat_id(order_pool_group_id)
+    assert await db.get_order_pool_chat_id() == order_pool_group_id
+
+    mock_bot.sent_messages.clear()
+    pool_msg_id = await pipeline_dispatcher.dispatch_to_order_pool(sample_order)
+    assert len(mock_bot.sent_messages) == 1
+    pool_msg = mock_bot.sent_messages[0]
+    assert pool_msg["chat_id"] == order_pool_group_id
+    assert pool_msg.get("protect_content") is True, "protect_content MUST be True for anti-sharing security"
+    assert "Marxamat" in pool_msg["text"]
+    assert "+998901234567" in pool_msg["text"]
+    print("   [PASS] Order successfully dispatched to Order Pool group with protect_content=True!")
+
+    # Test send_test_order_pool_message
+    mock_bot.sent_messages.clear()
+    test_res = await pipeline_dispatcher.send_test_order_pool_message()
+    assert test_res["success"] is True
+    assert len(mock_bot.sent_messages) == 1
+    assert mock_bot.sent_messages[0]["chat_id"] == order_pool_group_id
+    assert mock_bot.sent_messages[0].get("protect_content") is True
+    print("   [PASS] send_test_order_pool_message successfully sent with protect_content=True!")
+
+    # Test full dispatch_order includes order_pool_sent: True
+    mock_bot.sent_messages.clear()
+    full_res = await pipeline_dispatcher.dispatch_order(sample_order, active_drivers=[])
+    assert full_res.get("order_pool_sent") is True
+    assert any(m["chat_id"] == order_pool_group_id and m.get("protect_content") is True for m in mock_bot.sent_messages)
+    print("   [PASS] dispatch_order pipeline automatically feeds Order Pool group!")
+
     print("\n" + "=" * 65)
     print("ALL STAGE 4 DISPATCH GRID & PAYWALL TEASER TESTS PASSED (100%)!")
     print("=" * 65)
 
 if __name__ == "__main__":
     asyncio.run(run_phase4_async_tests())
+

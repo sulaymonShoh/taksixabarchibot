@@ -772,10 +772,13 @@ async def claim_trial_call(call: CallbackQuery):
         f"📡 {body2}\n\n"
         f"⏳ <b>{exp_lbl}</b> <code>{result}</code> gacha"
     )
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t("🎯 Buyurtmalar (Radar)", user_script), callback_data="radar_menu")],
-        [InlineKeyboardButton(text=t("« Asosiy menyu", user_script), callback_data="back_dashboard")]
-    ])
+    order_pool_id = await db.get_order_pool_chat_id()
+    markup_btns = []
+    if order_pool_id:
+        markup_btns.append([InlineKeyboardButton(text=t("🚕 VIP Buyurtmalar guruhiga kirish", user_script), callback_data="join_order_pool_group")])
+    markup_btns.append([InlineKeyboardButton(text=t("🎯 Buyurtmalar (Radar)", user_script), callback_data="radar_menu")])
+    markup_btns.append([InlineKeyboardButton(text=t("« Asosiy menyu", user_script), callback_data="back_dashboard")])
+    markup = InlineKeyboardMarkup(inline_keyboard=markup_btns)
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
@@ -933,8 +936,16 @@ async def admin_approve_payment_call(call: CallbackQuery, bot: Bot):
         f"📅 **Yangi amal qilish muddati:** `{new_expiry}` gacha.\n\n"
         "E'lon tarqatish xizmatidan unumli foydalanishingizni tilaymiz!"
     )
+    user_script = await db.get_user_script(user_id)
+    order_pool_id = await db.get_order_pool_chat_id()
+    markup_btns = []
+    if order_pool_id:
+        markup_btns.append([InlineKeyboardButton(text=t("🚕 VIP Buyurtmalar guruhiga kirish", user_script), callback_data="join_order_pool_group")])
+    markup_btns.append([InlineKeyboardButton(text=t("🎯 Buyurtmalar (Radar)", user_script), callback_data="radar_menu")])
+    markup_btns.append([InlineKeyboardButton(text=t("« Asosiy menyu", user_script), callback_data="back_dashboard")])
+    user_kb = InlineKeyboardMarkup(inline_keyboard=markup_btns)
     try:
-        await bot.send_message(chat_id=user_id, text=user_msg, reply_markup=kb.back_kb(), parse_mode="Markdown")
+        await bot.send_message(chat_id=user_id, text=user_msg, reply_markup=user_kb, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Failed to send confirmation DM to user {user_id}: {e}")
         
@@ -2164,7 +2175,14 @@ async def render_radar_menu(message_or_call, user_id: int):
     )
 
     can_trial = await db.can_user_claim_trial(user_id)
-    markup = kb.radar_menu_kb(prefs, is_vip, script=user_script, can_claim_trial=can_trial)
+    order_pool_id = await db.get_order_pool_chat_id()
+    markup = kb.radar_menu_kb(
+        prefs,
+        is_vip,
+        script=user_script,
+        can_claim_trial=can_trial,
+        has_order_pool=bool(order_pool_id)
+    )
 
     if isinstance(message_or_call, Message):
         await message_or_call.answer(text, reply_markup=markup, parse_mode="HTML")
@@ -2203,6 +2221,55 @@ async def radar_command(message: Message, state: FSMContext):
 @router.callback_query(F.data == "radar_menu")
 async def radar_menu_call(call: CallbackQuery):
     await render_radar_menu(call, call.from_user.id)
+    await safe_answer(call)
+
+@router.callback_query(F.data == "join_order_pool_group")
+async def join_order_pool_group_call(call: CallbackQuery, bot: Bot):
+    user_id = call.from_user.id
+    user_script = await db.get_user_script(user_id)
+    user = await db.get_user(user_id)
+    _, is_vip = check_subscription(user.get("subscription_expiry") if user else None)
+    if not is_vip:
+        await safe_answer(call, t("Faqat faol VIP haydovchilar buyurtmalar guruhiga kira oladi!", user_script), show_alert=True)
+        return
+
+    order_pool_id = await db.get_order_pool_chat_id()
+    if not order_pool_id:
+        await safe_answer(call, t("Buyurtmalar guruhi vaqtincha sozlanmagan. Iltimos keyinroq urinib ko'ring.", user_script), show_alert=True)
+        return
+
+    try:
+        invite = await bot.create_chat_invite_link(
+            chat_id=order_pool_id,
+            name=f"VIP_{user_id}",
+            member_limit=1
+        )
+        join_url = invite.invite_link
+    except Exception as e:
+        logger.warning(f"Could not create dynamic invite link for {user_id}: {e}")
+        try:
+            chat = await bot.get_chat(order_pool_id)
+            join_url = chat.invite_link or f"https://t.me/c/{str(order_pool_id).replace('-100', '')}"
+        except Exception:
+            join_url = None
+
+    if not join_url:
+        await safe_answer(call, t("Guruh havolasini olishda xatolik yuz berdi. Admin bilan bog'laning.", user_script), show_alert=True)
+        return
+
+    title = t("🚕 VIP BUYURTMALAR GURUHI", user_script)
+    body1 = t("Sizning VIP obunangiz faol! Quyidagi havola orqali barcha yo'lovchi va pochta buyurtmalari oqimiga ulaning:", user_script)
+    body2 = t("🛡 Guruhda nusxa ko'chirish va xabarlarni boshqalarga ulashish (forward) taqiqlangan.", user_script)
+    btn_text = t("🚕 Guruhga qo'shilish", user_script)
+    back_text = t("« Orqaga", user_script)
+
+    text = f"<b>{title}</b>\n\n✅ {body1}\n\n⚠️ <i>{body2}</i>"
+    kb_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=btn_text, url=join_url)],
+        [InlineKeyboardButton(text=back_text, callback_data="radar_menu")]
+    ])
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb_markup, parse_mode="HTML")
     await safe_answer(call)
 
 @router.callback_query(F.data == "radar_toggle_state")
@@ -2314,16 +2381,42 @@ async def claim_order_call(call: CallbackQuery):
     result = await db.claim_harvested_order(oid, user_id)
     if result["success"]:
         await safe_answer(call, "✅ Buyurtma qabul qilindi! Mijoz bilan zudlik bilan bog'laning.", show_alert=True)
-        # Edit claiming driver's card immediately for 0ms visual responsiveness
+        # Edit claiming driver's card or group card
+        is_group = call.message.chat.type in ("group", "supergroup")
         with contextlib.suppress(TelegramBadRequest):
             current_text = call.message.html_text or call.message.text or ""
-            claimed_banner = "\n\n<b>✅ SIZ BU BUYURTMANI QABUL QILDINGIZ!</b>\n<i>Mijoz bilan bog'laning.</i>"
-            if "SIZ BU BUYURTMANI QABUL QILDINGIZ" not in current_text:
-                new_text = current_text + claimed_banner
+            claimer_name = call.from_user.full_name
+            if is_group:
+                claimed_banner = f"\n\n<b>✅ BAND QILINDI!</b>\n<i>Haydovchi: <a href=\"tg://user?id={user_id}\">{claimer_name}</a></i>"
+                new_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔒 Band qilindi", callback_data="noop")]
+                ])
+            else:
+                claimed_banner = "\n\n<b>✅ SIZ BU BUYURTMANI QABUL QILDINGIZ!</b>\n<i>Mijoz bilan bog'laning.</i>"
                 new_kb = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="✅ Qabul qilingan", callback_data="noop")]
                 ])
+
+            if "BAND QILINDI" not in current_text and "SIZ BU BUYURTMANI QABUL QILDINGIZ" not in current_text:
+                new_text = current_text + claimed_banner
                 await call.message.edit_text(new_text, reply_markup=new_kb, parse_mode="HTML")
+
+        # Send private confirmation DM to the winning driver with complete client info
+        order_dict = result.get("order") or {}
+        orig_name = order_dict.get("origin_district") or order_dict.get("origin_region") or ""
+        dest_name = order_dict.get("dest_district") or order_dict.get("dest_region") or ""
+        phone = order_dict.get("phone_number") or "Ko'rsatilmagan"
+        raw_text = order_dict.get("raw_text") or ""
+        dm_text = (
+            "🎉 <b>SIZ BUYURTMANI BAND QILDINGIZ!</b>\n\n"
+            f"📍 <b>Yo'nalish:</b> {orig_name} ➡️ {dest_name}\n"
+            f"📞 <b>Telefon:</b> <code>{phone}</code>\n"
+            f"📝 <b>Mijoz xabari:</b>\n<i>{raw_text}</i>\n\n"
+            "<i>Mijoz bilan zudlik bilan bog'laning. Oq yo'l!</i>"
+        )
+        with contextlib.suppress(Exception):
+            await call.bot.send_message(chat_id=user_id, text=dm_text, parse_mode="HTML")
+
         # Synchronize all other driver messages in the background
         if oid > 0:
             asyncio.create_task(default_dispatcher.sync_order_status(oid, "CLAIMED", user_id))
@@ -2928,3 +3021,116 @@ async def admin_recent_orders_call(call: CallbackQuery):
     ])
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
+# ==================== ADMIN ORDER POOL GROUP MANAGEMENT ====================
+class AdminOrderPoolStates(StatesGroup):
+    waiting_for_chat_id = State()
+
+@router.callback_query(F.data == "admin_order_pool")
+async def admin_order_pool_call(call: CallbackQuery, bot: Bot):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await safe_answer(call)
+    pool_id = await db.get_order_pool_chat_id()
+    chat_title = "Noma'lum"
+    is_set = bool(pool_id)
+    if pool_id:
+        try:
+            chat = await bot.get_chat(pool_id)
+            chat_title = chat.title or str(pool_id)
+        except Exception:
+            chat_title = "Guruh topilmadi yoki bot admin emas"
+
+    text = (
+        "🎯 <b>BUYURTMALAR GURUHI (ORDER POOL) SOZLAMASI</b>\n\n"
+        "Barcha yangi mijoz va pochta buyurtmalari to'g'ridan-to'g'ri ushbu yopiq guruhga "
+        "<b>Anti-sharing (nusxa ko'chirish va forward taqiqlangan)</b> holatida yuboriladi.\n\n"
+        f"📌 <b>Holat:</b> {'🟢 Ulangan' if is_set else '🔴 Sozlanmagan'}\n"
+        f"🏷 <b>Guruh nomi:</b> <b>{html.escape(chat_title)}</b>\n"
+        f"🆔 <b>Guruh ID:</b> <code>{pool_id or 'Kiritilmagan'}</code>\n\n"
+        "<i>💡 Guruh ID sini o'rnatish uchun quyidagi tugmani bosing va guruh ID sini yuboring (masalan: <code>-100234567890</code>).</i>"
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=kb.admin_order_pool_kb(is_set=is_set), parse_mode="HTML")
+
+@router.callback_query(F.data == "admin_set_order_pool")
+async def admin_set_order_pool_call(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await safe_answer(call)
+    await state.set_state(AdminOrderPoolStates.waiting_for_chat_id)
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Bekor qilish", callback_data="admin_order_pool")]
+    ])
+    text = (
+        "✏️ <b>BUYURTMALAR GURUHI ID SINI KIRITING</b>\n\n"
+        "Guruh ID sini yuboring (masalan: <code>-100123456789</code>) yoki ushbu guruhdan biror xabarni menga forward qiling.\n\n"
+        "⚠️ <i>Muhim: Bot ushbu guruhga admin qilib qo'shilgan bo'lishi va xabar yozish ruxsatiga ega bo'lishi shart!</i>"
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
+@router.message(AdminOrderPoolStates.waiting_for_chat_id)
+async def admin_save_order_pool_msg(message: Message, state: FSMContext, bot: Bot):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    chat_id = None
+    if message.forward_from_chat:
+        chat_id = message.forward_from_chat.id
+    else:
+        raw_text = (message.text or "").strip()
+        try:
+            chat_id = int(raw_text)
+        except ValueError:
+            chat_id = None
+
+    if not chat_id:
+        await message.answer("❌ Noto'g'ri format. Iltimos raqamli ID kiriting (masalan: <code>-100123456789</code>):", parse_mode="HTML")
+        return
+
+    await state.clear()
+    chat_title = str(chat_id)
+    try:
+        chat = await bot.get_chat(chat_id)
+        chat_title = chat.title or str(chat_id)
+    except Exception as e:
+        logger.warning(f"Bot could not get chat details for {chat_id}: {e}")
+
+    await db.set_order_pool_chat_id(chat_id)
+    text = (
+        "✅ <b>Buyurtmalar guruhi muvaffaqiyatli saqlandi!</b>\n\n"
+        f"🏷 <b>Guruh:</b> <b>{html.escape(chat_title)}</b>\n"
+        f"🆔 <b>ID:</b> <code>{chat_id}</code>\n\n"
+        "Endi harvester tomonidan tutib olingan barcha yangi buyurtmalar ushbu guruhga "
+        "anti-sharing himoyasi bilan yuboriladi."
+    )
+    await message.answer(text, reply_markup=kb.admin_order_pool_kb(is_set=True), parse_mode="HTML")
+
+@router.callback_query(F.data == "admin_test_order_pool")
+async def admin_test_order_pool_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await safe_answer(call, "Test xabar yuborilmoqda...")
+    from src.harvester.dispatcher import default_dispatcher
+    res = await default_dispatcher.send_test_order_pool_message()
+    if res.get("success"):
+        await call.message.answer(
+            "✅ <b>Test xabar muvaffaqiyatli yuborildi!</b>\n"
+            "Guruhga o'tib tekshirishingiz mumkin. Xabardan nusxa ko'chirish va forward qilish taqiqlangan.",
+            parse_mode="HTML"
+        )
+    else:
+        await call.message.answer(
+            f"❌ <b>Test xabar yuborishda xatolik:</b>\n<code>{html.escape(str(res.get('error')))}</code>\n\n"
+            "Bot guruhda admin ekanligiga va xabar yozish ruxsatiga ega ekanligiga ishonch hosil qiling.",
+            parse_mode="HTML"
+        )
+
+@router.callback_query(F.data == "admin_clear_order_pool")
+async def admin_clear_order_pool_call(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await db.set_order_pool_chat_id(0)
+    await safe_answer(call, "Buyurtmalar guruhi uzildi.", show_alert=True)
+    await admin_order_pool_call(call, call.bot)

@@ -13,6 +13,9 @@ API_HASH = os.getenv("API_HASH", "")
 # Channel for 1-Tap Payment Approvals (can be admin private chat ID or channel ID)
 ADMIN_CHANNEL_ID = int(os.getenv("ADMIN_CHANNEL_ID", os.getenv("ADMIN_ID", "0")))
 
+# Order Pool Group for Anti-Sharing / Competitor Protection Dispatch
+ORDER_POOL_CHAT_ID = int(os.getenv("ORDER_POOL_CHAT_ID", "0"))
+
 # Payment Card Settings
 PAYMENT_CARD_NUMBER = os.getenv("PAYMENT_CARD_NUMBER", "8600 0000 0000 0000")
 PAYMENT_CARD_HOLDER = os.getenv("PAYMENT_CARD_HOLDER", "ISMI FAMILIYASI")

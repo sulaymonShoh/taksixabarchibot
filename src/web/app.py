@@ -75,6 +75,9 @@ class ToggleHarvesterGroupRequest(BaseModel):
 class UpdateHarvesterGroupTagRequest(BaseModel):
     region_tag: str
 
+class SetOrderPoolRequest(BaseModel):
+    chat_id: int
+
 
 # ==================== HELPER FUNCTIONS ====================
 def enrich_user_data(u: Dict[str, Any]) -> Dict[str, Any]:
@@ -368,6 +371,7 @@ async def view_harvester(request: Request, username: str = Depends(verify_creden
     pending = await db.get_pending_payment_requests()
     hb_status = default_harvester_service.get_status()
     analytics = await db.get_group_quality_analytics()
+    order_pool_id = await db.get_order_pool_chat_id()
     return templates.TemplateResponse(request=request, name="harvester.html", context={
         "active_page": "harvester",
         "stats": stats,
@@ -375,7 +379,8 @@ async def view_harvester(request: Request, username: str = Depends(verify_creden
         "orders": orders,
         "pending_count": len(pending),
         "userbot": hb_status,
-        "analytics": analytics
+        "analytics": analytics,
+        "order_pool_chat_id": order_pool_id
     })
 
 @app.get("/api/harvester/analytics")
@@ -458,4 +463,15 @@ async def api_delete_harvester_group(group_id: int, username: str = Depends(veri
 async def api_get_harvested_orders(limit: int = 50, region: Optional[str] = None, username: str = Depends(verify_credentials)):
     orders = await db.get_recent_harvested_orders(limit=limit, region=region)
     return JSONResponse(orders)
+
+@app.post("/api/harvester/order-pool")
+async def api_set_order_pool(req: SetOrderPoolRequest, username: str = Depends(verify_credentials)):
+    await db.set_order_pool_chat_id(req.chat_id)
+    return JSONResponse({"success": True, "chat_id": req.chat_id})
+
+@app.post("/api/harvester/order-pool/test")
+async def api_test_order_pool(username: str = Depends(verify_credentials)):
+    from src.harvester.dispatcher import default_dispatcher
+    res = await default_dispatcher.send_test_order_pool_message()
+    return JSONResponse(res)
 

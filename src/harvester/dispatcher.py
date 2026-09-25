@@ -7,7 +7,7 @@ Dispatches matching passenger and cargo orders directly to active drivers via Te
 import re
 import asyncio
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
@@ -157,11 +157,11 @@ class OrderDispatcher:
         order: Dict[str, Any],
         match_meta: Dict[str, Any],
         script: str = "lat"
-    ) -> bool:
+    ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Dispatches an alert to a single driver."""
         if not self.bot:
             logger.warning("No bot instance configured for OrderDispatcher.")
-            return False
+            return False, None
 
         order_id = order.get("id", 0)
         username = order.get("telegram_username")
@@ -182,18 +182,14 @@ class OrderDispatcher:
                     )
                     self._total_vip_dispatched += 1
                     msg_id = getattr(sent_msg, "message_id", None) or (sent_msg.get("message_id") or sent_msg.get("id") if isinstance(sent_msg, dict) else None)
-                    if order_id and order_id > 0 and msg_id:
-                        try:
-                            await db.record_order_dispatch(order_id, driver_id, msg_id, is_vip=True)
-                        except Exception as d_err:
-                            logger.debug(f"Failed to record dispatch: {d_err}")
-                    return True
+                    rec = {"order_id": order_id, "driver_id": driver_id, "message_id": msg_id, "is_vip": True} if (order_id and msg_id) else None
+                    return True, rec
                 else:
                     # Teaser check: rate limit
                     now = time.time()
                     last_sent = self._teaser_last_sent.get(driver_id, 0)
                     if now - last_sent < self.teaser_cooldown_seconds:
-                        return False
+                        return False, None
 
                     text = self.format_teaser_notification(order, match_meta, script=script)
                     can_trial = await db.can_user_claim_trial(driver_id)
@@ -214,19 +210,87 @@ class OrderDispatcher:
                     self._teaser_last_sent[driver_id] = now
                     self._total_teasers_dispatched += 1
                     msg_id = getattr(sent_msg, "message_id", None) or (sent_msg.get("message_id") or sent_msg.get("id") if isinstance(sent_msg, dict) else None)
-                    if order_id and order_id > 0 and msg_id:
-                        try:
-                            await db.record_order_dispatch(order_id, driver_id, msg_id, is_vip=False)
-                        except Exception as d_err:
-                            logger.debug(f"Failed to record dispatch: {d_err}")
-                    return True
+                    rec = {"order_id": order_id, "driver_id": driver_id, "message_id": msg_id, "is_vip": False} if (order_id and msg_id) else None
+                    return True, rec
 
         except (TelegramForbiddenError, TelegramBadRequest) as e:
             logger.debug(f"Could not send order #{order_id} to driver #{driver_id}: {e}")
-            return False
+            return False, None
         except Exception as e:
             logger.error(f"Error sending order #{order_id} to driver #{driver_id}: {e}")
-            return False
+            return False, None
+
+    async def dispatch_to_order_pool(self, order: Dict[str, Any]) -> Optional[int]:
+        """
+        Dispatches the order directly to the designated VIP Order Pool Group
+        with Telegram anti-sharing and copy-paste security (protect_content=True).
+        """
+        if not self.bot:
+            logger.warning("No bot instance configured for OrderDispatcher.")
+            return None
+
+        order_pool_chat_id = await db.get_order_pool_chat_id()
+        if not order_pool_chat_id:
+            return None
+
+        order_id = order.get("id", 0)
+        username = order.get("telegram_username")
+        message_link = order.get("message_link")
+
+        # Full alert card for the VIP group
+        text = self.matcher.format_notification(order, {}, script="lat")
+        kb_markup = build_order_action_keyboard(
+            order_id,
+            username,
+            is_vip=True,
+            message_link=message_link,
+            script="lat"
+        )
+
+        try:
+            async with self._send_semaphore:
+                sent_msg = await self.bot.send_message(
+                    chat_id=order_pool_chat_id,
+                    text=text,
+                    reply_markup=kb_markup,
+                    parse_mode="HTML",
+                    protect_content=True  # Anti-sharing & copy-paste restriction
+                )
+            msg_id = getattr(sent_msg, "message_id", None) or (sent_msg.get("message_id") or sent_msg.get("id") if isinstance(sent_msg, dict) else None) or 1
+            if order_id and order_id > 0 and msg_id:
+                try:
+                    await db.record_order_dispatch(order_id, order_pool_chat_id, msg_id, is_vip=True)
+                except Exception as d_err:
+                    logger.debug(f"Failed to record group dispatch: {d_err}")
+            return msg_id
+        except Exception as e:
+            logger.error(f"Failed to dispatch order #{order_id} to order pool ({order_pool_chat_id}): {e}")
+            return None
+
+    async def send_test_order_pool_message(self) -> Dict[str, Any]:
+        """Sends a test message with protect_content=True to verify bot permissions in the group."""
+        if not self.bot:
+            return {"success": False, "error": "Bot instansiyasi ulanmagan"}
+        order_pool_chat_id = await db.get_order_pool_chat_id()
+        if not order_pool_chat_id:
+            return {"success": False, "error": "Order pool guruhi sozlanmagan"}
+        try:
+            test_text = (
+                "🔒 <b>TEST: TAKSI XABARCHI BUYURTMALAR GURUHI</b>\n\n"
+                "✅ <i>Ushbu guruhga yangi mijoz va pochta buyurtmalari avtomatik yuboriladi.</i>\n"
+                "🛡 <i>Anti-sharing va nusxa ko'chirish himoyasi (protect_content) yoqilgan.</i>"
+            )
+            async with self._send_semaphore:
+                sent = await self.bot.send_message(
+                    chat_id=order_pool_chat_id,
+                    text=test_text,
+                    parse_mode="HTML",
+                    protect_content=True
+                )
+            msg_id = getattr(sent, "message_id", None) or (sent.get("message_id") if isinstance(sent, dict) else None)
+            return {"success": True, "message_id": msg_id, "chat_id": order_pool_chat_id}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     async def dispatch_order(
         self,
@@ -234,14 +298,23 @@ class OrderDispatcher:
         active_drivers: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
-        Main entry point for dispatching a newly harvested order.
-        Finds matching drivers along highway corridors and sends alerts in parallel.
+        Main entry point for dispatching a newly harvested order:
+        1. Dispatches directly to VIP Order Pool Group with anti-sharing (protect_content=True).
+        2. Optionally finds matching drivers along highway corridors and sends DM alerts in parallel.
         """
+        pool_msg_id = await self.dispatch_to_order_pool(order)
+
         if active_drivers is None:
             active_drivers = await db.get_active_radar_drivers()
 
         if not active_drivers:
-            return {"vip_sent": 0, "teaser_sent": 0, "matched_count": 0}
+            return {
+                "order_id": order.get("id"),
+                "order_pool_sent": bool(pool_msg_id),
+                "vip_sent": 0,
+                "teaser_sent": 0,
+                "matched_count": 0
+            }
 
         tasks = []
         matched_drivers = []
@@ -260,13 +333,36 @@ class OrderDispatcher:
             tasks.append(self.send_to_driver(driver_id, is_vip, order, match_meta, script=driver_script))
 
         if not tasks:
-            return {"vip_sent": 0, "teaser_sent": 0, "matched_count": 0}
+            return {
+                "order_id": order.get("id"),
+                "order_pool_sent": bool(pool_msg_id),
+                "vip_sent": 0,
+                "teaser_sent": 0,
+                "matched_count": 0
+            }
 
         start_time = time.perf_counter()
         results = await asyncio.gather(*tasks, return_exceptions=True)
         duration_ms = (time.perf_counter() - start_time) * 1000
 
-        successful_sends = sum(1 for r in results if r is True)
+        successful_sends = 0
+        dispatch_records = []
+        for r in results:
+            if isinstance(r, tuple) and len(r) == 2:
+                success, rec = r
+                if success:
+                    successful_sends += 1
+                if rec:
+                    dispatch_records.append(rec)
+            elif r is True:
+                successful_sends += 1
+
+        if dispatch_records:
+            try:
+                await db.record_order_dispatches_batch(dispatch_records)
+            except Exception as b_err:
+                logger.debug(f"Failed to record batch dispatches: {b_err}")
+
         transit_lag = order.get("transit_lag_seconds")
         lag_str = f" | Transit Lag: {transit_lag:.1f}s" if transit_lag is not None else ""
         logger.info(
@@ -276,6 +372,7 @@ class OrderDispatcher:
 
         return {
             "order_id": order.get("id"),
+            "order_pool_sent": bool(pool_msg_id),
             "matched_count": len(tasks),
             "sent_count": successful_sends,
             "duration_ms": duration_ms

@@ -198,12 +198,41 @@ class SubscriptionReminderScheduler:
         while self._is_running:
             try:
                 await self.check_and_dispatch()
+                await self.cleanup_expired_order_pool_members()
                 await asyncio.sleep(self.check_interval_seconds)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in subscription reminder scheduler loop: {e}", exc_info=True)
                 await asyncio.sleep(60)
+
+    async def cleanup_expired_order_pool_members(self) -> int:
+        """
+        Kicks expired subscribers from the private VIP Order Pool group.
+        Bans and then unbans each expired user so they are removed from the group,
+        but can rejoin when they renew their subscription.
+        """
+        if not self.bot:
+            return 0
+
+        order_pool_chat_id = await db.get_order_pool_chat_id()
+        if not order_pool_chat_id:
+            return 0
+
+        expired_users = await db.get_recently_expired_users(hours=48)
+        kicked_count = 0
+
+        for u in expired_users:
+            uid = u["user_id"]
+            try:
+                await self.bot.ban_chat_member(order_pool_chat_id, uid)
+                await self.bot.unban_chat_member(order_pool_chat_id, uid)
+                kicked_count += 1
+                logger.info(f"Removed expired driver #{uid} from order pool group ({order_pool_chat_id}).")
+            except Exception as e:
+                logger.debug(f"Could not remove driver #{uid} from order pool group: {e}")
+
+        return kicked_count
 
     async def check_and_dispatch(self, now_utc: Optional[datetime] = None) -> int:
         """

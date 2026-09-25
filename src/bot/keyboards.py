@@ -293,7 +293,13 @@ ANDIJON_RADAR_DISTRICTS = [
     ("xonobod", "Xonobod"),
 ]
 
-def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool, script: str = "lat", can_claim_trial: bool = False) -> InlineKeyboardMarkup:
+def radar_menu_kb(
+    prefs: Dict[str, Any],
+    is_vip: bool,
+    script: str = "lat",
+    can_claim_trial: bool = False,
+    has_order_pool: bool = False
+) -> InlineKeyboardMarkup:
     is_active = bool(prefs.get("is_radar_active", True))
     direction = prefs.get("direction", "both")
     allow_passenger = bool(prefs.get("allow_passenger", True))
@@ -314,7 +320,14 @@ def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool, script: str = "lat", can_
     pass_icon = "✅" if allow_passenger else "⬜️"
     cargo_icon = "✅" if allow_cargo else "⬜️"
 
-    keyboard = [
+    keyboard = []
+    if has_order_pool:
+        if is_vip:
+            keyboard.append([InlineKeyboardButton(text=t("🚕 VIP Buyurtmalar guruhiga kirish", script), callback_data="join_order_pool_group")])
+        else:
+            keyboard.append([InlineKeyboardButton(text=t("🔒 VIP Guruh (Obuna talab etiladi)", script), callback_data="show_plans")])
+
+    keyboard.extend([
         [InlineKeyboardButton(text=status_text, callback_data="radar_toggle_state")],
         [InlineKeyboardButton(text=dir_text, callback_data="radar_toggle_dir")],
         [
@@ -323,7 +336,7 @@ def radar_menu_kb(prefs: Dict[str, Any], is_vip: bool, script: str = "lat", can_
         ],
         [InlineKeyboardButton(text=t(f"📍 Tumanlar filtri ({district_count} ta tanlangan)", script), callback_data="radar_districts")],
         [InlineKeyboardButton(text=sound_text, callback_data="radar_toggle_sound")]
-    ]
+    ])
 
     if not is_vip:
         if can_claim_trial:
@@ -386,6 +399,9 @@ def admin_harvester_hub_kb(userbot_online: bool = False) -> InlineKeyboardMarkup
     """Control keyboard for Harvester Radar subsystem."""
     keyboard = [
         [
+            InlineKeyboardButton(text="🎯 Buyurtmalar guruhi (Order Pool)", callback_data="admin_order_pool")
+        ],
+        [
             InlineKeyboardButton(text="➕ Guruh qo'shish", callback_data="admin_add_group"),
             InlineKeyboardButton(text="📋 Guruhlar ro'yxati", callback_data="admin_groups_list")
         ],
@@ -399,6 +415,21 @@ def admin_harvester_hub_kb(userbot_online: bool = False) -> InlineKeyboardMarkup
         ],
         [InlineKeyboardButton(text="👑 Asosiy panelga qaytish", callback_data="admin_panel")]
     ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def admin_order_pool_kb(is_set: bool = False) -> InlineKeyboardMarkup:
+    """Control keyboard for Order Pool Group settings."""
+    keyboard = [
+        [InlineKeyboardButton(text="✏️ Guruh ID sini kiritish", callback_data="admin_set_order_pool")],
+    ]
+    if is_set:
+        keyboard.append([
+            InlineKeyboardButton(text="🧪 Test xabar yuborish", callback_data="admin_test_order_pool"),
+            InlineKeyboardButton(text="🗑 Guruhni uzish", callback_data="admin_clear_order_pool")
+        ])
+    keyboard.append([
+        InlineKeyboardButton(text="« Harvester panel", callback_data="admin_harvester")
+    ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def admin_plans_kb(has_active_discount: bool = False) -> InlineKeyboardMarkup:
