@@ -7,10 +7,11 @@ import os
 import asyncio
 import inspect
 import contextlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from telethon import TelegramClient
 from telethon.utils import get_peer_id
+from telethon.tl.functions import PingRequest
 from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
 from telethon.errors import UserAlreadyParticipantError
@@ -66,7 +67,17 @@ class HarvesterService:
             return False
 
         try:
-            self.client = TelegramClient(self.session_path, API_ID, API_HASH)
+            self.client = TelegramClient(
+                self.session_path,
+                API_ID,
+                API_HASH,
+                timeout=15,
+                request_retries=3,
+                connection_retries=None,
+                retry_delay=1,
+                auto_reconnect=True,
+                flood_sleep_threshold=60
+            )
             await self.client.connect()
 
             if not await self.client.is_user_authorized():
@@ -89,6 +100,10 @@ class HarvesterService:
                 f"✅ Harvester Userbot connected: {me.first_name} "
                 f"({self._user_info['username'] or self._user_info['phone'] or me.id})"
             )
+
+            # Foreground dialog warmup: loads entity cache and registers active MTProto viewport with DC
+            with contextlib.suppress(Exception):
+                await self.client.get_dialogs(limit=50)
 
             # Initialize and start the HarvesterListener
             self.listener = HarvesterListener(client=self.client)
@@ -160,16 +175,23 @@ class HarvesterService:
                 healthy = False
                 if self.client and self.client.is_connected():
                     try:
-                        is_auth = await self.client.is_user_authorized()
-                        if is_auth and self.listener and self.listener._is_running:
+                        # Active MTProto keepalive: sends raw ping packet through the socket to Telegram DC.
+                        # Keeps NAT router port mappings open and detects dropped sockets in < 5 seconds.
+                        ping_call = self.client(PingRequest(ping_id=int(datetime.now(timezone.utc).timestamp())))
+                        if inspect.isawaitable(ping_call):
+                            await asyncio.wait_for(ping_call, timeout=5.0)
+                        elif hasattr(self.client, "is_user_authorized"):
+                            await self.client.is_user_authorized()
+
+                        if self.listener and self.listener._is_running:
                             healthy = True
                     except Exception as e:
-                        logger.warning(f"Harvester health check query failed: {e}")
+                        logger.warning(f"Harvester MTProto active ping failed: {e}")
                         healthy = False
 
                 if healthy:
                     self._status = "ONLINE"
-                    self._last_heartbeat = datetime.utcnow()
+                    self._last_heartbeat = datetime.now(timezone.utc)
                     self._consecutive_failures = 0
                     if self._alert_sent:
                         await self._notify_admin_recovery()
@@ -228,7 +250,17 @@ class HarvesterService:
 
         # 3. Connect fresh client
         try:
-            self.client = TelegramClient(self.session_path, API_ID, API_HASH)
+            self.client = TelegramClient(
+                self.session_path,
+                API_ID,
+                API_HASH,
+                timeout=15,
+                request_retries=3,
+                connection_retries=None,
+                retry_delay=1,
+                auto_reconnect=True,
+                flood_sleep_threshold=60
+            )
             await self.client.connect()
 
             if not await self.client.is_user_authorized():
@@ -248,13 +280,17 @@ class HarvesterService:
                 "phone": getattr(me, "phone", None)
             }
 
+            # Foreground dialog warmup: loads entity cache and registers active MTProto viewport with DC
+            with contextlib.suppress(Exception):
+                await self.client.get_dialogs(limit=50)
+
             # 4. Re-attach and restart HarvesterListener
             self.listener = HarvesterListener(client=self.client)
             await self.listener.start()
 
             self._is_running = True
             self._status = "ONLINE"
-            self._last_heartbeat = datetime.utcnow()
+            self._last_heartbeat = datetime.now(timezone.utc)
             self._consecutive_failures = 0
             self._last_error = None
             logger.info(f"✅ Harvester Userbot successfully reconnected and listening! ({me.first_name})")

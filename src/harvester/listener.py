@@ -4,6 +4,7 @@ Captures incoming messages via MTProto event stream in < 200ms,
 applies in-memory deduplication, runs fast NLP parsing, and archives to DB.
 """
 import asyncio
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Callable, Awaitable, List
 from telethon import TelegramClient, events
 
@@ -57,7 +58,8 @@ class HarvesterListener:
         message_id: Optional[int] = None,
         message_link: Optional[str] = None,
         sender_id: Optional[int] = None,
-        preparsed_order: Optional[Dict[str, Any]] = None
+        preparsed_order: Optional[Dict[str, Any]] = None,
+        transit_lag_seconds: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Core processing pipeline for any incoming message:
@@ -136,6 +138,8 @@ class HarvesterListener:
             order["message_id"] = message_id
         if message_link:
             order["message_link"] = message_link
+        if transit_lag_seconds is not None:
+            order["transit_lag_seconds"] = transit_lag_seconds
 
         # 3. Persist order to SQLite database
         order_id = await db.save_harvested_order(order)
@@ -146,10 +150,11 @@ class HarvesterListener:
         order["id"] = order_id
         orig_name = (order.get("origin") or {}).get("name", "?")
         dest_name = (order.get("destination") or order.get("dest") or {}).get("name", "?")
+        lag_str = f" | Transit Lag: {transit_lag_seconds:.1f}s" if transit_lag_seconds is not None else ""
         logger.info(
             f"New Order #{order_id} captured from '{chat_title}': "
             f"[{order['order_type']}] {orig_name} -> "
-            f"{dest_name} ({phone or 'No phone'})"
+            f"{dest_name} ({phone or 'No phone'}){lag_str}"
         )
 
         # 4. Trigger dispatch callback for active drivers (Stage 3 & 4)
@@ -174,11 +179,26 @@ class HarvesterListener:
             # Record raw message seen in group telemetry buffer
             self.record_activity(chat_id, seen=1)
 
-            # 1. Fast in-memory deduplication check (<0.05ms)
+            # 1. Message freshness guard: Drop messages older than 300 seconds (5 minutes)
+            transit_lag_seconds: Optional[float] = None
+            msg_date = getattr(event, "date", None)
+            if msg_date:
+                now_utc = datetime.now(timezone.utc)
+                if getattr(msg_date, "tzinfo", None) is None:
+                    msg_date = msg_date.replace(tzinfo=timezone.utc)
+                transit_lag_seconds = max(0.0, (now_utc - msg_date).total_seconds())
+                if transit_lag_seconds > 300:  # 5-minute guard threshold
+                    logger.info(
+                        f"Skipping stale message #{getattr(event, 'id', '?')} from group {chat_id} "
+                        f"(Transit lag: {transit_lag_seconds:.1f}s > 300s threshold)"
+                    )
+                    return
+
+            # 2. Fast in-memory deduplication check (<0.05ms)
             if self.dedup.is_duplicate(raw_text):
                 return
 
-            # 2. Fast in-memory NLP parsing (<0.06ms)
+            # 3. Fast in-memory NLP parsing (<0.06ms)
             # Rejects 95%+ of messages (driver ads, spam, greetings) immediately!
             order = self.parser.parse(raw_text)
             if not order:
@@ -223,7 +243,8 @@ class HarvesterListener:
                 message_id=message_id,
                 message_link=message_link,
                 sender_id=sender_id,
-                preparsed_order=order
+                preparsed_order=order,
+                transit_lag_seconds=transit_lag_seconds
             )
         except Exception as e:
             logger.error(f"Error in harvester _process_event: {e}", exc_info=True)

@@ -118,6 +118,7 @@ class OrderDispatcher:
         self._teaser_last_sent: Dict[int, float] = {}
         self._total_vip_dispatched = 0
         self._total_teasers_dispatched = 0
+        self._send_semaphore = asyncio.Semaphore(25)  # Telegram Bot API global broadcast limit protection
 
     def format_vip_notification(self, order: Dict[str, Any], match_meta: Dict[str, Any], script: str = "lat") -> str:
         """Formats full uncensored order alert for active VIP drivers."""
@@ -168,56 +169,57 @@ class OrderDispatcher:
         sound_alert = match_meta.get("sound_alerts", True)
 
         try:
-            if is_vip:
-                text = self.format_vip_notification(order, match_meta, script=script)
-                kb_markup = build_order_action_keyboard(order_id, username, is_vip=True, message_link=message_link, script=script)
-                sent_msg = await self.bot.send_message(
-                    chat_id=driver_id,
-                    text=text,
-                    reply_markup=kb_markup,
-                    parse_mode="HTML",
-                    disable_notification=not sound_alert
-                )
-                self._total_vip_dispatched += 1
-                msg_id = getattr(sent_msg, "message_id", None) or (sent_msg.get("message_id") or sent_msg.get("id") if isinstance(sent_msg, dict) else None)
-                if order_id and order_id > 0 and msg_id:
-                    try:
-                        await db.record_order_dispatch(order_id, driver_id, msg_id, is_vip=True)
-                    except Exception as d_err:
-                        logger.debug(f"Failed to record dispatch: {d_err}")
-                return True
-            else:
-                # Teaser check: rate limit
-                now = time.time()
-                last_sent = self._teaser_last_sent.get(driver_id, 0)
-                if now - last_sent < self.teaser_cooldown_seconds:
-                    return False
+            async with self._send_semaphore:
+                if is_vip:
+                    text = self.format_vip_notification(order, match_meta, script=script)
+                    kb_markup = build_order_action_keyboard(order_id, username, is_vip=True, message_link=message_link, script=script)
+                    sent_msg = await self.bot.send_message(
+                        chat_id=driver_id,
+                        text=text,
+                        reply_markup=kb_markup,
+                        parse_mode="HTML",
+                        disable_notification=not sound_alert
+                    )
+                    self._total_vip_dispatched += 1
+                    msg_id = getattr(sent_msg, "message_id", None) or (sent_msg.get("message_id") or sent_msg.get("id") if isinstance(sent_msg, dict) else None)
+                    if order_id and order_id > 0 and msg_id:
+                        try:
+                            await db.record_order_dispatch(order_id, driver_id, msg_id, is_vip=True)
+                        except Exception as d_err:
+                            logger.debug(f"Failed to record dispatch: {d_err}")
+                    return True
+                else:
+                    # Teaser check: rate limit
+                    now = time.time()
+                    last_sent = self._teaser_last_sent.get(driver_id, 0)
+                    if now - last_sent < self.teaser_cooldown_seconds:
+                        return False
 
-                text = self.format_teaser_notification(order, match_meta, script=script)
-                can_trial = await db.can_user_claim_trial(driver_id)
-                kb_markup = build_order_action_keyboard(
-                    order_id,
-                    username,
-                    is_vip=False,
-                    script=script,
-                    can_claim_trial=can_trial
-                )
-                sent_msg = await self.bot.send_message(
-                    chat_id=driver_id,
-                    text=text,
-                    reply_markup=kb_markup,
-                    parse_mode="HTML",
-                    disable_notification=True
-                )
-                self._teaser_last_sent[driver_id] = now
-                self._total_teasers_dispatched += 1
-                msg_id = getattr(sent_msg, "message_id", None) or (sent_msg.get("message_id") or sent_msg.get("id") if isinstance(sent_msg, dict) else None)
-                if order_id and order_id > 0 and msg_id:
-                    try:
-                        await db.record_order_dispatch(order_id, driver_id, msg_id, is_vip=False)
-                    except Exception as d_err:
-                        logger.debug(f"Failed to record dispatch: {d_err}")
-                return True
+                    text = self.format_teaser_notification(order, match_meta, script=script)
+                    can_trial = await db.can_user_claim_trial(driver_id)
+                    kb_markup = build_order_action_keyboard(
+                        order_id,
+                        username,
+                        is_vip=False,
+                        script=script,
+                        can_claim_trial=can_trial
+                    )
+                    sent_msg = await self.bot.send_message(
+                        chat_id=driver_id,
+                        text=text,
+                        reply_markup=kb_markup,
+                        parse_mode="HTML",
+                        disable_notification=True
+                    )
+                    self._teaser_last_sent[driver_id] = now
+                    self._total_teasers_dispatched += 1
+                    msg_id = getattr(sent_msg, "message_id", None) or (sent_msg.get("message_id") or sent_msg.get("id") if isinstance(sent_msg, dict) else None)
+                    if order_id and order_id > 0 and msg_id:
+                        try:
+                            await db.record_order_dispatch(order_id, driver_id, msg_id, is_vip=False)
+                        except Exception as d_err:
+                            logger.debug(f"Failed to record dispatch: {d_err}")
+                    return True
 
         except (TelegramForbiddenError, TelegramBadRequest) as e:
             logger.debug(f"Could not send order #{order_id} to driver #{driver_id}: {e}")
@@ -265,8 +267,10 @@ class OrderDispatcher:
         duration_ms = (time.perf_counter() - start_time) * 1000
 
         successful_sends = sum(1 for r in results if r is True)
+        transit_lag = order.get("transit_lag_seconds")
+        lag_str = f" | Transit Lag: {transit_lag:.1f}s" if transit_lag is not None else ""
         logger.info(
-            f"Dispatched Order #{order.get('id')} to {successful_sends}/{len(tasks)} "
+            f"[LATENCY] Dispatched Order #{order.get('id')}{lag_str} to {successful_sends}/{len(tasks)} "
             f"matched drivers in {duration_ms:.2f}ms."
         )
 
@@ -354,13 +358,14 @@ class OrderDispatcher:
                     base_text = "<b>Taksi Xabarchi Buyurtmasi</b>"
 
                 new_text = base_text + banner
-                await self.bot.edit_message_text(
-                    chat_id=driver_id,
-                    message_id=msg_id,
-                    text=new_text,
-                    reply_markup=kb,
-                    parse_mode="HTML"
-                )
+                async with self._send_semaphore:
+                    await self.bot.edit_message_text(
+                        chat_id=driver_id,
+                        message_id=msg_id,
+                        text=new_text,
+                        reply_markup=kb,
+                        parse_mode="HTML"
+                    )
                 return True
             except (TelegramBadRequest, TelegramForbiddenError):
                 return False

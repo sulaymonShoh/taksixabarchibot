@@ -11,6 +11,8 @@ import os
 import sys
 import asyncio
 import time
+from datetime import datetime, timezone, timedelta
+from unittest.mock import MagicMock
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath("."))
@@ -172,6 +174,38 @@ async def run_phase2_async_tests():
     g2_updated = await db.get_harvester_group(-1002222222222)
     assert g2_updated["total_harvested"] == 2
     print("   [PASS] Harvester group total_harvested metrics incremented accurately.")
+
+    # ==================== 4. MESSAGE FRESHNESS GUARD ====================
+    print("\n>>> 4. Testing 5-Minute Message Freshness Guard...")
+    
+    # Stale event: posted 8 minutes ago (480s lag > 300s threshold)
+    stale_event = MagicMock()
+    stale_event.id = 5551
+    stale_event.raw_text = "Asakadan Toshkentga 2 kishi bor tel: 991112233"
+    stale_event.date = datetime.now(timezone.utc) - timedelta(minutes=8)
+    stale_event.chat = MagicMock()
+    stale_event.chat.title = "Andijon Toshkent Guruh"
+    stale_event.chat.username = "andijontaksi"
+    stale_event.sender_id = 998877
+
+    await listener._process_event(stale_event, -1002222222222)
+    assert len(dispatched_orders) == 3, "Stale order should have been dropped!"
+    print("   [PASS] 8-minute-old message successfully dropped by 300s freshness guard.")
+
+    # Fresh event: posted 30 seconds ago (30s lag < 300s threshold)
+    fresh_event = MagicMock()
+    fresh_event.id = 5552
+    fresh_event.raw_text = "Shahrixondan Toshkentga 1 kishi bor pochta ham bor tel: 994445566"
+    fresh_event.date = datetime.now(timezone.utc) - timedelta(seconds=30)
+    fresh_event.chat = MagicMock()
+    fresh_event.chat.title = "Andijon Toshkent Guruh"
+    fresh_event.chat.username = "andijontaksi"
+    fresh_event.sender_id = 998878
+
+    await listener._process_event(fresh_event, -1002222222222)
+    assert len(dispatched_orders) == 4, "Fresh order should have been dispatched!"
+    assert dispatched_orders[-1]["transit_lag_seconds"] >= 25.0
+    print("   [PASS] 30-second-fresh message ingested and transit lag recorded.")
 
     # Clean up test database
     if os.path.exists("data/test_v3_harvester.db"):
