@@ -36,14 +36,16 @@ def transliterate_cyrillic_to_latin(text: str) -> str:
 DRIVER_AD_PHRASES = frozenset([
     "mashina bor", "moshina bor", "moshin bor", "mashin bor", "moshina tayyor", "mashina tayyor",
     "joy bor", "joybor", "salonda joy bor", "joyimiz bor", "joy qoldi",
-    "konditsioner bor", "konditsionerli", "konditsaner", "kanditsaner",
+    "konditsioner bor", "konditsionerli", "konditsaner", "kanditsaner", "kondisioner", "kandisoner",
     "dispecher", "dispetcher", "zakaz olaman", "zakaz olamiz", "buyurtma olamiz", "buyurtma olaman",
     "yurishga tayyor", "yolga chiqamiz", "yo'lga chiqamiz", "yulga chiqamiz",
     "bosh mashina", "bo'sh mashina", "bosh moshina", "bo'sh moshina",
     "pustoy mashina", "pustoy moshina", "pustoy", "пустой",
     "odam ovolaman", "odam olaman", "pochta olaman", "yuk olaman", "pochta olamiz", "yuk olamiz",
     "olamiz", "bulsa olamiz", "bo'lsa olamiz", "bosa olamiz", "olaman",
-    "ayol kishi bor", "ayol bor", "tom bagaj", "tom bagaj bor", "tomida bagaj bor",
+    "bolsa olmiz", "bo'lsa olmiz", "bosa olmiz", "bulsa olmiz", "olmiz", "ovomiz", "ovolamiz", "olvolamiz", "obketamiz", "olibketamiz",
+    "ayol kishi bor", "ayol bor", "ayollar bor", "ayolar bor", "ayollarbor", "ayolarbor", "aellar bor", "aelar bor",
+    "tom bagaj", "tom bagaj bor", "tom bagaji bor", "tombagaj", "tombagaj bor", "tombagajbor", "tombagaji bor", "tomida bagaj bor", "tomda bagaj",
     "yuraman", "ketaman", "kelent vaqtiga", "klient vaqtiga", "kilient vaqtiga", "kilient vaktiga",
     "klient vaktiga", "kelent vaktiga", "kliyent vaqtiga", "kilyent vaqtiga",
     "vaqtiga yuramiz", "vaktiga yuramiz", "vaqtiga chiqamiz", "vaktiga chiqamiz",
@@ -55,7 +57,7 @@ DRIVER_AD_PHRASES = frozenset([
     "wi fi bor", "wifi bor", "kilik bor", "klik bor", "click bor", "payme bor",
     "odam kam", "kishi kam", "joy kam", "yo'lovchi kam", "yolovchi kam", "kam odam", "kam kishi",
     "kamdamiz", "kamdamz", "kamdamiza", "kamimiz", "kamimiz bor",
-    "oldi bosh", "oldi bo'sh", "oldi bush", "oldida joy bor",
+    "oldi bosh", "oldi bo'sh", "oldi bush", "oldida joy bor", "oldi mesta bosh", "oldi mesta bo'sh", "mesta bosh", "mesta bo'sh", "mesta pustoy",
     "xarkatamiz", "xarakattamiz", "xarakaddamz", "xarakatdamiz", "harakatdamiz",
     "ael kishi bor", "ael bor",
     "pokiza salon", "toza salon",
@@ -67,6 +69,19 @@ DRIVER_AD_PHRASES = frozenset([
     "narxi kelishilgan", "arzon narxda olib ketaman", "arzon obketaman"
 ])
 
+# Common car models pattern for regexes
+CAR_MODELS_PATTERN = (
+    r"(?:cobalt|kobalt|kobolt|cobolt|koblt|kobult|kobilt|kubilt|kubalt|sobalt|"
+    r"gentra|jentra|jentr|gentr|jantr|gantr|"
+    r"nexia|neksia|neksiya|nexiya|neksya|nexya|neksi|nexi|"
+    r"lacetti|lasetti|laceti|laseti|"
+    r"damas|damaz|labo|"
+    r"monza|onix|oniks|spark|"
+    r"matiz|matis|tico|tiko|"
+    r"malibu|tracker|traktor|kaptiva|captiva|"
+    r"kia|k5|hyundai|sonata|byd|chazor|epica|epika)"
+)
+
 # Pre-compiled word-boundary regexes for driver ad phrases to prevent substring collisions (e.g. "joy bor" vs "joy bormi")
 DRIVER_AD_PHRASE_REGEXES: List[Pattern] = [
     re.compile(r"\b" + re.escape(p) + r"\b", re.IGNORECASE) for p in DRIVER_AD_PHRASES
@@ -75,37 +90,44 @@ DRIVER_AD_PHRASE_REGEXES: List[Pattern] = [
 # Regex patterns matching driver car mentions (e.g. "Cobalt bor", "Gentra yuradi", "2 kishi kerak to'laman")
 DRIVER_AD_REGEXES: List[Pattern] = [
     # Car model with preceding adjective (yangi, toza, mashina, avto, m) or model alone
-    re.compile(r"\b(?:yangi|toza|mashina|moshina|avto|m)\s+(?:model\s+)?(?:cobalt|kobalt|koblt|kobult|kobilt|kubilt|kubalt|sobalt|gentra|jentra|nexia|neksia|lacetti|lasetti|damas|monza|onix|spark|malibu|tracker|kaptiva|captiva|kia|k5|hyundai|sonata|byd|chazor)\b", re.IGNORECASE),
+    re.compile(r"\b(?:yangi|toza|mashina|moshina|mashinasi|moshinasi|avto|avtomobil|avtomobili|m)\s*[:\-—]?\s*(?:model\s+)?" + CAR_MODELS_PATTERN + r"\b", re.IGNORECASE),
     # Car model followed by manufacturing year (e.g. "Kubilt 2026", "Cobalt 2024")
-    re.compile(r"\b(?:cobalt|kobalt|koblt|kobult|kobilt|kubilt|kubalt|sobalt|gentra|jentra|nexia|neksia|damas|monza|onix|spark|malibu|tracker|k5)\s+(?:20[12]\d)\b", re.IGNORECASE),
+    re.compile(CAR_MODELS_PATTERN + r"\s+(?:20[12]\d)\b", re.IGNORECASE),
     # Car model + presence / fuel / condition
-    re.compile(r"\b(?:cobalt|kobalt|koblt|kobult|kobilt|kubilt|kubalt|sobalt|gentra|jentra|nexia|neksia|lacetti|lasetti|damas|labo|monza|onix|spark|malibu|tracker|kaptiva|captiva|kia|k5|hyundai|sonata|byd)\b.*?\b(?:bor|tayyor|yuradi|yurmoqchi|chiqadi|kutmoqda|propan|prapan|metan|benzin|yangi|lyuks|komfort)\b", re.IGNORECASE),
+    re.compile(CAR_MODELS_PATTERN + r"\b.*?\b(?:bor|tayyor|yuradi|yurmoqchi|chiqadi|kutmoqda|propan|prapan|metan|benzin|yangi|lyuks|komfort)\b", re.IGNORECASE),
     # Driver looking for remaining passengers to fill seats (e.g. "4 ta odam kam", "2 ta kam", "1 ta kamdamiz", "4 ta kamdamz")
     re.compile(r"\b(?:[1-4]|bitta|ikkita|uchta|to'rtta|torta|bita)?\s*(?:ta\s*)?(?:odam|kishi|yo'lovchi|yolovchi|joy)?\s*kam(?:da)?(?:miz|mz|miza)?\b", re.IGNORECASE),
     re.compile(r"\b([1-4]|bitta|ikkita|uchta|to'rtta|torta|bita)[\s\.\-]*ta[\s\.\-]*kam(?:da)?(?:miz|mz|miza)?\b", re.IGNORECASE),
     re.compile(r"\bkam\s*(?:odam|kishi|yo'lovchi|yolovchi|joy)\b", re.IGNORECASE),
     # Departure schedule pitches (e.g. "klient vaqtiga yuramiz", "vaqtiga qarab yuramiz")
     re.compile(r"\b(?:klient|kelent|kilient|kliyent|kilyent|mijoz)\s*(?:vaqtiga|vaktiga|vaxtiga|vahtiga)\b", re.IGNORECASE),
-    re.compile(r"\b(?:vaqtiga|vaktiga|vaxtiga|vahtiga)\s*(?:qarab\s*)?(?:yuramiz|yuramz|chiqamiz|yuriladi|ketamiz)\b", re.IGNORECASE),
+    re.compile(r"\b(?:vaqtiga|vaktiga|vaxtiga|vahtiga)\s*(?:qarab\s*)?(?:yu+ramiz|yu+ramz|chiqamiz|yuriladi|ketamiz)\b", re.IGNORECASE),
     re.compile(r"\b(?:yulga|yolga|yo'lga)\s*(?:chikamiz|chiqamiz|chikamz|chiqamz)\b", re.IGNORECASE),
-    re.compile(r"\b(?:srochni|srochno|sirushni|siroshni|sirochni|tezkor)\s*(?:yuramiz|yuramz|chikamiz|chiqamiz|ketamiz|yuriladi)\b", re.IGNORECASE),
-    re.compile(r"\b\d{1,2}[:\.]\d{2}\s*ga\s*(?:yuramiz|yuramz|chikamiz|chiqamiz|chiqiladi|yuriladi)\b", re.IGNORECASE),
+    re.compile(r"\b(?:srochni|srochno|sirushni|siroshni|sirochni|tezkor)\s*(?:yu+ramiz|yu+ramz|chikamiz|chiqamiz|ketamiz|yuriladi)\b", re.IGNORECASE),
+    re.compile(r"\b\d{1,2}[:\.]\d{2}(?:\s*(?:dan|-|—|\.\.\.)?\s*\d{1,2}[:\.]\d{2})?\s*(?:da|ga|lar|larga|atrofida)?\s*(?:yu+ramiz|yu+ramz|yu+riladi|chiqamiz|chikamiz|chiqiladi|ketamiz|yurvommiz|yurvotmiz|yurvotti)\b", re.IGNORECASE),
     # Fuel types explicitly advertised (passengers never list fuel types)
     re.compile(r"\b(?:benzin|benzinda|propan|propanda|metan|metanda|bez\s*metan|bez\s*gaz)\b", re.IGNORECASE),
     # Service offerings (pochta xizmati bor, biznes klass)
     re.compile(r"\b(?:pochta|puchta|dostavka|taksi|taxi)\s*xizmat(?:i|lari)?\b", re.IGNORECASE),
     re.compile(r"\b(?:bisnes|biznes)\s*klass?\b", re.IGNORECASE),
     re.compile(r"\b(?:har|xar)\s*kuni\s*xizmat\b", re.IGNORECASE),
-    # Driver taking passengers/cargo: "odam pochtalar bo'lsa olamiz", "pochta olamz", "pchta olamiz"
-    re.compile(r"\b(?:odam|pochta|pchta|yuk)\w*\s*(?:bo'lsa|bolsa|bulsa|bosa)?\s*(?:olamiz|olamz|olaman|olamiza|olamizlar)\b", re.IGNORECASE),
+    # Driver taking passengers/cargo: "odam pochtalar bo'lsa olamiz", "pochta olamz", "pchta olamiz", "pochta bolsa olmiz"
+    re.compile(r"\b(?:odam|kishi|yo'lovchi|yolovchi|pochta|pchta|puchta|yuk)\w*(?:\s+(?:odam|kishi|yo'lovchi|yolovchi|pochta|pchta|puchta|yuk)\w*)*\s*(?:bo'lsa|bolsa|bulsa|bosa|ham|xam)?\s*(?:olamiz|olmiz|olamz|olamiza|olvolamiz|olvolamz|ovolamiz|ovomiz|obketamiz|olibketamiz|obketamz|olaman|olman|ovolaman|olvolaman|obketaman|olibketaman)\b", re.IGNORECASE),
     # Driver front seat vacant (excluding passenger asking "kimni oldi bo'sh")
-    re.compile(r"(?<!kimni\s)\b(?:oldi|aldi)\s*(?:bo'sh|bosh|bush|pustoy)\b", re.IGNORECASE),
+    re.compile(r"(?<!kimni\s)\b(?:oldi|aldi)\s*(?:mesta|mesto|o'rindiq|orindiq|joy|sidenya|sedad)?\s*(?:bo'sh|bosh|bush|pustoy)\b", re.IGNORECASE),
+    re.compile(r"\b(?:mesta|mesto|o'rindiq|orindiq|sidenya)\s*(?:bo'sh|bosh|bush|pustoy)\b", re.IGNORECASE),
+    # Roof luggage rack
+    re.compile(r"\b(?:tombagaj\w*|tom\s*(?:ida|da)?\s*bagaj\w*)\b", re.IGNORECASE),
+    # Female passengers presence
+    re.compile(r"\b(?:ayol|ayollar|ayolar|ael|aellar|aelar)\w*\s*(?:kishi\s*)?bor\b", re.IGNORECASE),
     # "Salonda X ta joy bor"
     re.compile(r"\b(joy|orindiq|o'rindiq)\s*(bor|qoldi)\b", re.IGNORECASE),
     # "Odam bormi" / "Kishi bormi" by driver soliciting groups
     re.compile(r"\b(odam|kishi|yo'lovchi|yolovchi)\s*(bormi|bormikin)\s*(olib|obketgani|yurishga)\b", re.IGNORECASE),
     # Phone numbers combined with car types
-    re.compile(r"\b(?:cobalt|kobalt|koblt|kobult|kobilt|kubilt|gentra|jentra|nexia|damas|onix|malibu|tracker)\b.*?(?:\+?998\d{9}|\b9\d{8}\b)", re.IGNORECASE),
+    re.compile(CAR_MODELS_PATTERN + r"\b.*?(?:\+?998\d{9}|\b9\d{8}\b)", re.IGNORECASE),
+    # Air conditioning / Connectivity driver emojis
+    re.compile(r"(?:[❄️❄]{2,}|[🛜📶]{2,})"),
     # Commercial lodging / hotel / hostel / room rental advertisements:
     re.compile(
         r"\b(?:(?:yangi|arzon|lyuks)?\s*(?:mexmonxona|mehmonxona|hostel|xostel)|gostinitsa|yotoqxona)\b.*?\b(?:xona\w*|kishi\s*boshiga|sum|so\'m|kunlik|kruglosutochn\w*|\d+\s*ming)\b"
