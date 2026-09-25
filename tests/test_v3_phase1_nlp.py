@@ -157,7 +157,8 @@ def run_phase1_tests():
         # Dialectal driver advertisement with multiple colloquial features
         "ТОШКЕНТГА     9:00  10:00  ДА     ЮУРАМИЗ     2  ТА    ОДАМ   ПОЧТА   БОЛСА   ОЛМИЗ  ТОМБАГАЖ   БОР   АЙОЛАР  БОР     ОЛДИ  МЕСТА    БОШ    АВТО    КОБОЛТ  ❄️❄️❄️❄️🛜🛜🛜  ТЕЛ    999043330    943853330   ОЛДИНДАН   РАХМАТ",
         "Toshkentga 9:00 - 10:00 da yuramiz. 2 ta odam, pochta bo'lsa olamiz. Tom bagaji bor. Ayol yo'lovchilar bor. Oldi o'rindiq bo'sh. Avtomobil - Cobalt. Telefon: 999043330, 943853330. Oldindan rahmat.",
-        "Эрталаб. тошкенга харакатамиз  андижон хожаобод достлик таможнидан тошкенга одам почта болса олиб кэтамиз \n974853434"
+        "Эрталаб. тошкенга харакатамиз  андижон хожаобод достлик таможнидан тошкенга одам почта болса олиб кэтамиз \n974853434",
+        "anjondan toshknga siroshni ketamz. oldi mestamiz bosh poshtala ovolamz 999999999"
     ]
 
     for ad in driver_ads:
