@@ -4,6 +4,8 @@ Captures incoming messages via MTProto event stream in < 200ms,
 applies in-memory deduplication, runs fast NLP parsing, and archives to DB.
 """
 import asyncio
+import time
+import inspect
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Callable, Awaitable, List
 from telethon import TelegramClient, events
@@ -41,6 +43,8 @@ class HarvesterListener:
         self._stats_buffer: Dict[int, Dict[str, int]] = {}
         self._flush_task: Optional[asyncio.Task] = None
         self._flush_interval: int = 10  # seconds between batched DB flushes
+        self._pulse_task: Optional[asyncio.Task] = None
+        self._stale_tracker: Dict[int, Dict[str, Any]] = {}
 
     async def reload_monitored_groups(self):
         """Refreshes active group IDs and metadata cache from the database."""
@@ -193,10 +197,11 @@ class HarvesterListener:
                     msg_date = msg_date.replace(tzinfo=timezone.utc)
                 transit_lag_seconds = max(0.0, (now_utc - msg_date).total_seconds())
                 if transit_lag_seconds > 300:  # 5-minute guard threshold
-                    logger.info(
+                    logger.debug(
                         f"Skipping stale message #{getattr(event, 'id', '?')} from group {chat_id} "
                         f"(Transit lag: {transit_lag_seconds:.1f}s > 300s threshold)"
                     )
+                    self._record_stale(chat_id, transit_lag_seconds)
                     return
 
             # 2. Fast in-memory deduplication check (<0.05ms)
@@ -291,6 +296,62 @@ class HarvesterListener:
             except Exception as e:
                 logger.error(f"Error in analytics flush loop: {e}")
 
+    def _record_stale(self, chat_id: int, lag: float):
+        """Buffers stale message events to emit a single aggregated summary log instead of flooding."""
+        now = time.time()
+        info = self._stale_tracker.get(chat_id)
+        if not info or (now - info.get("last_log", 0) > 3.0):
+            self._stale_tracker[chat_id] = {
+                "count": 1,
+                "max_lag": lag,
+                "last_log": now
+            }
+            asyncio.create_task(self._delayed_stale_summary(chat_id))
+        else:
+            info["count"] += 1
+            info["max_lag"] = max(info["max_lag"], lag)
+            info["last_log"] = now
+
+    async def _delayed_stale_summary(self, chat_id: int):
+        """Emits an aggregated summary for a burst of stale messages after a brief delay."""
+        await asyncio.sleep(1.0)
+        info = self._stale_tracker.pop(chat_id, None)
+        if info and info["count"] > 0:
+            group_info = self._monitored_groups_cache.get(chat_id, {})
+            title = group_info.get("title") or str(chat_id)
+            c = info["count"]
+            max_min = info["max_lag"] / 60.0
+            logger.info(f"⏩ [STALE] {c} ta eskirgan xabar o'tkazib yuborildi ('{title}' | Lag: ~{max_min:.1f} daqiqa)")
+
+    async def _channel_pulse_loop(self):
+        """
+        Periodically touches monitored supergroups (every 25s) to signal active viewport to Telegram DC.
+        Forces Telegram servers to flush channel sequence differences in near-real-time (<25s)
+        instead of buffering messages for 5-8 minutes.
+        """
+        while self._is_running:
+            try:
+                await asyncio.sleep(25)
+                if not self._is_running or not self.client or not self.client.is_connected():
+                    continue
+
+                chat_ids = list(self._monitored_chat_ids)
+                for cid in chat_ids:
+                    if not self._is_running:
+                        break
+                    try:
+                        msgs_call = self.client.get_messages(cid, limit=1)
+                        if inspect.isawaitable(msgs_call):
+                            await asyncio.wait_for(msgs_call, timeout=3.0)
+                    except Exception:
+                        pass
+                    # Gentle stagger between group queries
+                    await asyncio.sleep(0.4)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Harvester channel pulse exception: {e}")
+
     def setup_event_handlers(self):
         """Attaches Telethon events.NewMessage handler to the client."""
         if not self.client:
@@ -312,19 +373,24 @@ class HarvesterListener:
             asyncio.create_task(self._process_event(event, chat_id))
 
     async def start(self):
-        """Starts the harvester listener and background stats flush loop."""
+        """Starts the harvester listener, stats flush loop, and channel pulse loop."""
         self._is_running = True
         await self.reload_monitored_groups()
         self.setup_event_handlers()
         if self._flush_task is None or self._flush_task.done():
             self._flush_task = asyncio.create_task(self._flush_loop())
+        if self._pulse_task is None or self._pulse_task.done():
+            self._pulse_task = asyncio.create_task(self._channel_pulse_loop())
         logger.info("HarvesterListener started successfully.")
 
     async def stop(self):
-        """Stops the harvester listener and flushes pending telemetry."""
+        """Stops the harvester listener, pulse loop, and flushes pending telemetry."""
         self._is_running = False
         if self._flush_task and not self._flush_task.done():
             self._flush_task.cancel()
             self._flush_task = None
+        if self._pulse_task and not self._pulse_task.done():
+            self._pulse_task.cancel()
+            self._pulse_task = None
         await self.flush_stats_buffer()
         logger.info("HarvesterListener stopped.")
