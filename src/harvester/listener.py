@@ -110,14 +110,34 @@ class HarvesterListener:
                 return None
 
         phone = order.get("phone_number")
+        orig_id = (order.get("origin") or {}).get("region_id") or (order.get("origin") or {}).get("id")
+        dest_id = (order.get("destination") or order.get("dest") or {}).get("region_id") or (order.get("destination") or order.get("dest") or {}).get("id")
+        route_tuple = (orig_id, dest_id)
+        order_type = order.get("order_type")
+        p_count = order.get("passenger_count", 1)
         
-        # Second-pass phone-based deduplication
-        if phone and self.dedup.is_duplicate(text, phone=phone):
-            logger.info(f"[DEDUP_PHONE] Raqam ({phone}) bo'yicha takroriy xabar e'tiborsiz qoldirildi ('{chat_title}')")
+        # Second-pass composite deduplication (Identity + Route + Content Similarity)
+        if (phone or sender_id) and self.dedup.is_duplicate(
+            text,
+            phone=phone,
+            sender_id=sender_id,
+            route=route_tuple,
+            order_type=order_type,
+            passenger_count=p_count
+        ):
+            contact_label = f"Raqam ({phone})" if phone else f"Foydalanuvchi ({sender_id})"
+            logger.info(f"[DEDUP] {contact_label} bo'yicha takroriy xabar e'tiborsiz qoldirildi ('{chat_title}')")
             return None
 
         # Record into deduplication cache
-        msg_hash = self.dedup.record(text, phone=phone)
+        msg_hash = self.dedup.record(
+            text,
+            phone=phone,
+            sender_id=sender_id,
+            route=route_tuple,
+            order_type=order_type,
+            passenger_count=p_count
+        )
         order["message_hash"] = msg_hash
         order["source_group_id"] = chat_id
         order["source_group_title"] = chat_title
@@ -348,16 +368,16 @@ class HarvesterListener:
             title = group_info.get("title") or str(chat_id)
             c = info["count"]
             max_min = info["max_lag"] / 60.0
-            now_str = datetime.now().strftime("%H:%M:%S")
-            logger.info(f"[STALE] ({now_str}) {c} ta eskirgan xabar o'tkazib yuborildi ('{title}' | Lag: ~{max_min:.1f} daqiqa)")
+            logger.info(f"[STALE]     {c} ta eskirgan xabar o'tkazib yuborildi ('{title}' | Lag: ~{max_min:.1f} daqiqa)")
 
     async def _active_poller_loop(self):
         """
         Hybrid Active Poller:
-        Sweeps all monitored taxi supergroups on a 60-second cycle with 1.0s stagger.
+        Sweeps all monitored taxi supergroups on a 60-second cycle using bounded concurrency (Semaphore=4).
         Fetches live messages directly via Telegram MTProto RPC (messages.getHistory).
         Guarantees orders are captured in < 60s even when Telegram DC delays socket push events.
         """
+        sem = asyncio.Semaphore(4)
         while self._is_running:
             try:
                 sweep_start = time.time()
@@ -367,60 +387,69 @@ class HarvesterListener:
                     continue
 
                 chat_ids = list(self._monitored_chat_ids)
+                total_groups = len(chat_ids)
+                stagger = max(0.1, min(1.0, 30.0 / max(1, total_groups)))
+
+                async def _sweep_single_group(cid: int):
+                    nonlocal cycle_new_msgs
+                    async with sem:
+                        try:
+                            msgs_call = self.client.get_messages(cid, limit=20)
+                            if inspect.isawaitable(msgs_call):
+                                msgs = await asyncio.wait_for(msgs_call, timeout=5.0)
+                            else:
+                                msgs = msgs_call
+
+                            if msgs:
+                                last_known_id = self._last_seen_msg_ids.get(cid)
+
+                                # First time inspecting this group: establish baseline watermark
+                                if last_known_id is None:
+                                    max_id = max(getattr(m, "id", 0) for m in msgs)
+                                    self._last_seen_msg_ids[cid] = max_id
+                                    # Only process messages that are ACTUALLY fresh (<300s) right now;
+                                    # silently ignore historical messages from hours/days ago without false [STALE] spam
+                                    for msg in reversed(msgs):
+                                        msg_date = getattr(msg, "date", None)
+                                        if msg_date:
+                                            now_utc = datetime.now(timezone.utc)
+                                            if getattr(msg_date, "tzinfo", None) is None:
+                                                msg_date = msg_date.replace(tzinfo=timezone.utc)
+                                            if (now_utc - msg_date).total_seconds() <= 300:
+                                                cycle_new_msgs += 1
+                                                asyncio.create_task(self._process_event(msg, cid))
+                                else:
+                                    # Normal sweep: ONLY process messages strictly NEWER than last_known_id!
+                                    new_msgs = [m for m in msgs if getattr(m, "id", 0) > last_known_id]
+                                    if new_msgs:
+                                        cycle_new_msgs += len(new_msgs)
+                                        self._last_seen_msg_ids[cid] = max(getattr(m, "id", 0) for m in new_msgs)
+                                        for msg in reversed(new_msgs):
+                                            asyncio.create_task(self._process_event(msg, cid))
+
+                        except FloodWaitError as e:
+                            logger.warning(f"Telegram FloodWait in harvester active poller: sleeping {e.seconds}s")
+                            await asyncio.sleep(e.seconds)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as e:
+                            logger.warning(f"Harvester active poller error for group {cid}: {e}")
+
+                sweep_tasks = []
                 for cid in chat_ids:
                     if not self._is_running:
                         break
-                    try:
-                        msgs_call = self.client.get_messages(cid, limit=20)
-                        if inspect.isawaitable(msgs_call):
-                            msgs = await asyncio.wait_for(msgs_call, timeout=5.0)
-                        else:
-                            msgs = msgs_call
+                    sweep_tasks.append(asyncio.create_task(_sweep_single_group(cid)))
+                    await asyncio.sleep(stagger)
 
-                        if msgs:
-                            last_known_id = self._last_seen_msg_ids.get(cid)
-
-                            # First time inspecting this group: establish baseline watermark
-                            if last_known_id is None:
-                                max_id = max(getattr(m, "id", 0) for m in msgs)
-                                self._last_seen_msg_ids[cid] = max_id
-                                # Only process messages that are ACTUALLY fresh (<300s) right now;
-                                # silently ignore historical messages from hours/days ago without false [STALE] spam
-                                for msg in reversed(msgs):
-                                    msg_date = getattr(msg, "date", None)
-                                    if msg_date:
-                                        now_utc = datetime.now(timezone.utc)
-                                        if getattr(msg_date, "tzinfo", None) is None:
-                                            msg_date = msg_date.replace(tzinfo=timezone.utc)
-                                        if (now_utc - msg_date).total_seconds() <= 300:
-                                            cycle_new_msgs += 1
-                                            asyncio.create_task(self._process_event(msg, cid))
-                            else:
-                                # Normal sweep: ONLY process messages strictly NEWER than last_known_id!
-                                new_msgs = [m for m in msgs if getattr(m, "id", 0) > last_known_id]
-                                if new_msgs:
-                                    cycle_new_msgs += len(new_msgs)
-                                    self._last_seen_msg_ids[cid] = max(getattr(m, "id", 0) for m in new_msgs)
-                                    for msg in reversed(new_msgs):
-                                        asyncio.create_task(self._process_event(msg, cid))
-
-                    except FloodWaitError as e:
-                        logger.warning(f"Telegram FloodWait in harvester active poller: sleeping {e.seconds}s")
-                        await asyncio.sleep(e.seconds)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as e:
-                        logger.warning(f"Harvester active poller error for group {cid}: {e}")
-
-                    # 1.0 second gentle stagger between group queries
-                    await asyncio.sleep(1.0)
+                if sweep_tasks:
+                    await asyncio.gather(*sweep_tasks, return_exceptions=True)
 
                 # Rest for the remainder of the 60-second cycle
                 elapsed = time.time() - sweep_start
                 sleep_remainder = max(5.0, 60.0 - elapsed)
-                now_str = datetime.now().strftime("%H:%M:%S")
                 logger.info(
-                    f"[POLLER] ({now_str}) Cycle finished in {elapsed:.1f}s | "
+                    f"[POLLER]    Cycle finished in {elapsed:.1f}s | "
                     f"Checked {len(chat_ids)} groups | New msgs: {cycle_new_msgs} | "
                     f"Sleeping {sleep_remainder:.1f}s"
                 )
@@ -449,9 +478,8 @@ class HarvesterListener:
                 self._recent_dedup_count = 0
                 self._recent_orders_count = 0
 
-                now_str = datetime.now().strftime("%H:%M:%S")
                 logger.info(
-                    f"[HARVESTER] ({now_str}) Summary: Seen: {seen} msgs | "
+                    f"[HARVESTER] Summary: Seen: {seen} msgs | "
                     f"Driver Ads/Spam: {spam} | Duplicates: {dedup} | "
                     f"Orders Captured: {orders}"
                 )

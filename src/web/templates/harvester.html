@@ -12,6 +12,11 @@
             <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Superguruhlarni tinglash, guruh qo'shish va Order Pool sozlamalari</p>
         </div>
         <div class="flex items-center space-x-3">
+            <div class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 shadow-xs">
+                <input type="checkbox" id="autoRefreshToggle" checked onchange="toggleAutoRefresh(this)" class="accent-amber-500 rounded cursor-pointer">
+                <label for="autoRefreshToggle" class="cursor-pointer font-medium select-none">30s Avto-yangilash</label>
+                <span id="refreshCountdown" class="text-amber-500 font-bold ml-1">30s</span>
+            </div>
             <button onclick="openAddGroupModal()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm transition shadow-sm flex items-center space-x-2 cursor-pointer">
                 <i class="fa-solid fa-plus"></i>
                 <span>Guruh Qo'shish</span>
@@ -429,5 +434,41 @@
             alert('Aloqa xatosi: ' + err);
         }
     }
+
+    // 30-Second Auto-Refresh Logic
+    let autoRefreshCountdown = 30;
+    function runAutoRefreshTimer() {
+        const toggle = document.getElementById("autoRefreshToggle");
+        const badge = document.getElementById("refreshCountdown");
+        if (!toggle || !toggle.checked) return;
+
+        autoRefreshCountdown--;
+        if (badge) badge.textContent = autoRefreshCountdown + "s";
+        if (autoRefreshCountdown <= 0) {
+            window.location.reload();
+        }
+    }
+
+    function toggleAutoRefresh(cb) {
+        localStorage.setItem("harvester_autorefresh", cb.checked ? "1" : "0");
+        const badge = document.getElementById("refreshCountdown");
+        if (!cb.checked) {
+            if (badge) badge.textContent = "To'xtatilgan";
+        } else {
+            autoRefreshCountdown = 30;
+            if (badge) badge.textContent = "30s";
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        const saved = localStorage.getItem("harvester_autorefresh");
+        const toggle = document.getElementById("autoRefreshToggle");
+        if (toggle && saved === "0") {
+            toggle.checked = false;
+            const badge = document.getElementById("refreshCountdown");
+            if (badge) badge.textContent = "To'xtatilgan";
+        }
+        setInterval(runAutoRefreshTimer, 1000);
+    });
 </script>
 {% endblock %}

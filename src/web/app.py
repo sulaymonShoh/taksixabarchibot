@@ -394,7 +394,10 @@ async def api_broadcast(req: BroadcastRequest, username: str = Depends(verify_cr
     async def run_broadcast():
         for u in users:
             try:
-                await bot.send_message(chat_id=u['user_id'], text=req.text, parse_mode="Markdown")
+                try:
+                    await bot.send_message(chat_id=u['user_id'], text=req.text, parse_mode="HTML")
+                except Exception:
+                    await bot.send_message(chat_id=u['user_id'], text=req.text)
                 await asyncio.sleep(0.05)
             except Exception as e:
                 logger.error(f"Failed broadcast to {u['user_id']}: {e}")

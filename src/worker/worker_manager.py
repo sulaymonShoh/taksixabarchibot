@@ -1,4 +1,4 @@
-﻿import os
+import os
 import asyncio
 import contextlib
 from datetime import datetime
@@ -102,17 +102,18 @@ class WorkerManager:
         return False
 
     async def _sync_loop(self):
-        """Background synchronization loop ensuring only valid active subscribers run."""
+        """Background synchronization loop ensuring only valid active subscribers run (single-query JOIN)."""
         logger.info("WorkerManager background sync loop started.")
         while self._is_running:
             try:
-                users = await db.get_all_users()
+                configs = await db.get_all_active_worker_configs()
                 now = datetime.utcnow()
+                active_user_ids = set()
 
-                for user in users:
-                    user_id = user['user_id']
-                    is_banned = user.get('is_banned', 0)
-                    expiry_str = user.get('subscription_expiry')
+                for cfg in configs:
+                    user_id = cfg['user_id']
+                    is_banned = cfg.get('is_banned', 0)
+                    expiry_str = cfg.get('subscription_expiry')
 
                     is_valid_sub = False
                     if expiry_str and not is_banned:
@@ -123,17 +124,19 @@ class WorkerManager:
                         except Exception:
                             pass
 
-                    settings = await db.get_user_settings(user_id)
-                    is_running = settings.get('is_running', False)
+                    is_running = bool(cfg.get('is_running', False))
 
                     # Should be running?
                     if is_valid_sub and is_running and is_user_authenticated(user_id):
+                        active_user_ids.add(user_id)
                         if user_id not in self.user_tasks or self.user_tasks[user_id].done():
                             await self.start_user_worker(user_id)
-                    else:
-                        # Should NOT be running?
-                        if user_id in self.active_workers:
-                            await self.stop_user_worker(user_id)
+
+                # Stop any workers that are no longer active/valid
+                running_ids = list(self.active_workers.keys())
+                for u_id in running_ids:
+                    if u_id not in active_user_ids:
+                        await self.stop_user_worker(u_id)
 
                 await asyncio.sleep(30)
             except asyncio.CancelledError:

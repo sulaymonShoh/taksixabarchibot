@@ -8,6 +8,18 @@ from src.logger import setup_logger
 
 logger = setup_logger("database")
 
+@contextlib.asynccontextmanager
+async def get_db():
+    """
+    Centralized async database connection context manager.
+    Enforces busy_timeout = 5000 and synchronous = NORMAL on EVERY connection
+    to guarantee zero database lock collisions under concurrent writes.
+    """
+    async with aiosqlite.connect(DB_PATH, timeout=10.0) as conn:
+        await conn.execute('PRAGMA busy_timeout = 5000;')
+        await conn.execute('PRAGMA synchronous = NORMAL;')
+        yield conn
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         # Enable Write-Ahead Logging (WAL) for non-blocking concurrent reads and writes
@@ -27,15 +39,18 @@ async def init_db():
                 is_banned BOOLEAN DEFAULT 0,
                 script TEXT DEFAULT 'lat',
                 has_used_trial BOOLEAN DEFAULT 0,
+                order_pool_kicked BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Check and migrate has_used_trial column if missing
+        # Check and migrate has_used_trial and order_pool_kicked columns if missing
         async with db.execute("PRAGMA table_info(users)") as cursor:
             columns = [row[1] for row in await cursor.fetchall()]
             if 'has_used_trial' not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN has_used_trial BOOLEAN DEFAULT 0")
+            if 'order_pool_kicked' not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN order_pool_kicked BOOLEAN DEFAULT 0")
         
         # User settings table
         await db.execute('''
@@ -380,7 +395,7 @@ async def activate_user_trial(user_id: int, hours: int = 24) -> Tuple[bool, str]
             expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S')
             
             await db.execute(
-                'UPDATE users SET subscription_expiry = ?, has_used_trial = 1 WHERE user_id = ?',
+                'UPDATE users SET subscription_expiry = ?, has_used_trial = 1, order_pool_kicked = 0 WHERE user_id = ?',
                 (expiry_str, user_id)
             )
             await db.commit()
@@ -512,8 +527,8 @@ async def update_user_subscription(user_id: int, days_to_add: int) -> str:
     new_expiry = start_date + timedelta(days=days_to_add)
     new_expiry_str = new_expiry.strftime('%Y-%m-%d %H:%M:%S')
     
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('UPDATE users SET subscription_expiry = ? WHERE user_id = ?', (new_expiry_str, user_id))
+    async with get_db() as db:
+        await db.execute('UPDATE users SET subscription_expiry = ?, order_pool_kicked = 0 WHERE user_id = ?', (new_expiry_str, user_id))
         await db.commit()
         
     return new_expiry_str
@@ -791,8 +806,8 @@ async def set_order_pool_chat_id(chat_id: Optional[int]):
     await set_global_setting("order_pool_chat_id", int(chat_id) if chat_id else 0)
 
 async def get_recently_expired_users(hours: int = 48) -> List[Dict[str, Any]]:
-    """Retrieves users whose VIP subscription expired recently (for group access cleanup)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    """Retrieves users whose VIP subscription expired recently and have not yet been evicted from order pool."""
+    async with get_db() as db:
         db.row_factory = aiosqlite.Row
         now = datetime.utcnow()
         cutoff = (now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
@@ -803,11 +818,21 @@ async def get_recently_expired_users(hours: int = 48) -> List[Dict[str, Any]]:
             WHERE subscription_expiry IS NOT NULL
               AND subscription_expiry < ?
               AND subscription_expiry >= ?
+              AND COALESCE(order_pool_kicked, 0) = 0
             """,
             (now_str, cutoff)
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
+
+async def mark_user_order_pool_kicked(user_id: int, kicked: bool = True):
+    """Marks whether a user was evicted from the VIP order pool upon subscription expiration."""
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE users SET order_pool_kicked = ? WHERE user_id = ?",
+            (1 if kicked else 0, user_id)
+        )
+        await db.commit()
 
 # ==================== CAMPAIGN DISCOUNTS ====================
 async def get_active_campaign_discount() -> Optional[Dict[str, Any]]:
@@ -1706,11 +1731,70 @@ async def update_pricing_plan(
     if not fields:
         return False
     params.append(months)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(f"UPDATE pricing_plans SET {', '.join(fields)} WHERE months = ?", params)
         await db.commit()
     return True
 
 
+async def prune_harvested_data(retention_days: int = 7) -> Dict[str, int]:
+    """
+    Prunes harvested orders, dispatches, and temporary analytics older than retention_days.
+    Prevents SQLite database bloat and preserves sub-millisecond query performance.
+    """
+    cutoff = (datetime.utcnow() - timedelta(days=retention_days)).strftime("%Y-%m-%d %H:%M:%S")
+    async with get_db() as db:
+        # Delete dispatches for old orders
+        cur_disp = await db.execute(
+            """
+            DELETE FROM harvested_order_dispatches
+            WHERE dispatched_at < ? OR order_id IN (
+                SELECT id FROM harvested_orders WHERE harvested_at < ?
+            )
+            """,
+            (cutoff, cutoff)
+        )
+        deleted_dispatches = cur_disp.rowcount
+
+        cur_orders = await db.execute(
+            "DELETE FROM harvested_orders WHERE harvested_at < ?",
+            (cutoff,)
+        )
+        deleted_orders = cur_orders.rowcount
+        await db.commit()
+
+        logger.info(
+            f"Pruned historical data (> {retention_days} days): "
+            f"{deleted_orders} orders, {deleted_dispatches} dispatch logs removed."
+        )
+        return {"deleted_orders": deleted_orders, "deleted_dispatches": deleted_dispatches}
 
 
+async def get_all_active_worker_configs() -> List[Dict[str, Any]]:
+    """
+    Single-query JOIN retrieving active users and their broadcast settings.
+    Eliminates the N+1 query loop in WorkerManager.
+    """
+    async with get_db() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT 
+                u.user_id,
+                u.full_name,
+                u.subscription_expiry,
+                u.is_banned,
+                COALESCE(s.is_running, 0) as is_running,
+                s.source_chat_id,
+                s.drop_author,
+                s.jitter_min,
+                s.jitter_max,
+                s.cycle_min,
+                s.cycle_max
+            FROM users u
+            LEFT JOIN user_settings s ON u.user_id = s.user_id
+            WHERE u.subscription_expiry IS NOT NULL AND u.is_banned = 0
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]

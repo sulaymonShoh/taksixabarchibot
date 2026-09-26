@@ -15,6 +15,7 @@ Guarantees:
 4. Full bilingual support (Latin and Cyrillic).
 """
 import asyncio
+import contextlib
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple
 from aiogram import Bot
@@ -195,10 +196,19 @@ class SubscriptionReminderScheduler:
             logger.info("Subscription reminder scheduler stopped.")
 
     async def _loop(self):
+        last_prune_time = 0.0
         while self._is_running:
             try:
                 await self.check_and_dispatch()
                 await self.cleanup_expired_order_pool_members()
+
+                # Daily database retention pruning (> 7 days)
+                now_ts = datetime.utcnow().timestamp()
+                if now_ts - last_prune_time > 86400:
+                    with contextlib.suppress(Exception):
+                        await db.prune_harvested_data(retention_days=7)
+                    last_prune_time = now_ts
+
                 await asyncio.sleep(self.check_interval_seconds)
             except asyncio.CancelledError:
                 break
@@ -211,6 +221,7 @@ class SubscriptionReminderScheduler:
         Kicks expired subscribers from the private VIP Order Pool group.
         Bans and then unbans each expired user so they are removed from the group,
         but can rejoin when they renew their subscription.
+        Idempotent: marks users as evicted to avoid repeated spam.
         """
         if not self.bot:
             return 0
@@ -231,6 +242,9 @@ class SubscriptionReminderScheduler:
                 logger.info(f"Removed expired driver #{uid} from order pool group ({order_pool_chat_id}).")
             except Exception as e:
                 logger.debug(f"Could not remove driver #{uid} from order pool group: {e}")
+            finally:
+                # Mark user as evicted so we never repeatedly execute ban/unban on every pass
+                await db.mark_user_order_pool_kicked(uid, True)
 
         return kicked_count
 
