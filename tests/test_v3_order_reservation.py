@@ -346,11 +346,14 @@ async def run_tests():
     assert "Lichka: <a href=" in winner_dm.text
     assert "Yozish</a>" in winner_dm.text
     assert "https://t.me/test_passenger" in winner_dm.text
-    # 4. Buttons include Lichkaga yozish and Asl xabarni ko'rish
+    # 4. Mijoz xabari and Oq yo'l
+    assert "Mijoz xabari:" in winner_dm.text
+    assert "Oq yo'l!" in winner_dm.text
+    # 5. Buttons include Lichkaga yozish and Asl xabarni ko'rish
     dm_btns = [b for row in winner_dm.reply_markup.inline_keyboard for b in row]
     assert any("Lichkaga yozish" in b.text and "test_passenger" in b.url for b in dm_btns)
     assert any("Asl xabarni ko'rish" in b.text for b in dm_btns)
-    print("   [PASS] Winning DM verified: Clean route, Ko'rsatilmagan phone, author profile link and action buttons!")
+    print("   [PASS] Winning DM verified: Clean route, Ko'rsatilmagan phone, author profile link, customer message, and action buttons!")
 
     print("\n" + "=" * 70)
     print("ALL REAL-TIME ORDER RESERVATION & SYNC TESTS PASSED (100% SUCCESS)!")

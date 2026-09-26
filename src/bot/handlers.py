@@ -2568,11 +2568,15 @@ async def claim_order_call(call: CallbackQuery):
             profile_link = "Ko'rsatilmagan"
             author_url = None
 
+        safe_raw_text = html.escape(raw_text)
         dm_text = (
             "<b>Siz buyurtmani qabul qildingiz</b>\n\n"
             f"Yo'nalish: {orig_name} -> {dest_name}\n"
             f"Telefon: {phone_display}\n"
-            f"Lichka: {profile_link}"
+            f"Lichka: {profile_link}\n\n"
+            "Mijoz xabari:\n"
+            f"<i>{safe_raw_text}</i>\n\n"
+            "Oq yo'l!"
         )
 
         dm_buttons = []
