@@ -55,6 +55,17 @@ class HarvesterListener:
         self._monitored_groups_cache = {g["group_id"]: g for g in groups}
         logger.info(f"Harvester listening to {len(self._monitored_chat_ids)} active groups.")
 
+        # Pre-resolve input entities so get_messages never fails with "Could not find input entity"
+        if self.client and self.client.is_connected():
+            for g in groups:
+                cid = g["group_id"]
+                username = g.get("username")
+                try:
+                    target = username or cid
+                    await self.client.get_input_entity(target)
+                except Exception as e:
+                    logger.warning(f"Could not resolve entity for harvester group '{g.get('title')}' ({cid}): {e}")
+
     async def process_raw_message(
         self,
         chat_id: int,
@@ -349,22 +360,13 @@ class HarvesterListener:
                     if not self._is_running:
                         break
                     try:
-                        last_id = self._last_seen_msg_ids.get(cid)
-                        if last_id:
-                            msgs_call = self.client.get_messages(cid, limit=20, min_id=last_id)
-                        else:
-                            msgs_call = self.client.get_messages(cid, limit=10)
-
+                        msgs_call = self.client.get_messages(cid, limit=20)
                         if inspect.isawaitable(msgs_call):
                             msgs = await asyncio.wait_for(msgs_call, timeout=5.0)
                         else:
                             msgs = msgs_call
 
                         if msgs:
-                            new_max_id = max(getattr(m, "id", 0) for m in msgs)
-                            if new_max_id > self._last_seen_msg_ids.get(cid, 0):
-                                self._last_seen_msg_ids[cid] = new_max_id
-
                             # Process in chronological order (oldest to newest)
                             for msg in reversed(msgs):
                                 asyncio.create_task(self._process_event(msg, cid))
@@ -375,7 +377,7 @@ class HarvesterListener:
                     except asyncio.CancelledError:
                         raise
                     except Exception as e:
-                        logger.debug(f"Harvester active poller transient error for {cid}: {e}")
+                        logger.warning(f"Harvester active poller error for group {cid}: {e}")
 
                     # 1.0 second gentle stagger between group queries
                     await asyncio.sleep(1.0)

@@ -104,7 +104,7 @@ class HarvesterService:
 
             # Foreground dialog warmup: loads entity cache and registers active MTProto viewport with DC
             with contextlib.suppress(Exception):
-                await self.client.get_dialogs(limit=50)
+                await self.client.get_dialogs(limit=300)
 
             # Initialize and start the HarvesterListener
             self.listener = HarvesterListener(client=self.client)
