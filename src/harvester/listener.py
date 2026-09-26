@@ -47,6 +47,11 @@ class HarvesterListener:
         self._pulse_task: Optional[asyncio.Task] = None
         self._stale_tracker: Dict[int, Dict[str, Any]] = {}
         self._last_seen_msg_ids: Dict[int, int] = {}
+        self._recent_seen_count: int = 0
+        self._recent_spam_count: int = 0
+        self._recent_dedup_count: int = 0
+        self._recent_orders_count: int = 0
+        self._summary_task: Optional[asyncio.Task] = None
 
     async def reload_monitored_groups(self):
         """Refreshes active group IDs and metadata cache from the database."""
@@ -94,21 +99,21 @@ class HarvesterListener:
             # 1. Deduplication check
             if self.dedup.is_duplicate(text):
                 clean_preview = text.replace('\n', ' ').strip()[:45]
-                logger.info(f"🔁 [DEDUP] Takroriy xabar e'tiborsiz qoldirildi ('{chat_title}'): \"{clean_preview}...\"")
+                logger.info(f"[DEDUP] Takroriy xabar e'tiborsiz qoldirildi ('{chat_title}'): \"{clean_preview}...\"")
                 return None
 
             # 2. In-memory NLP parsing (Rejects driver ads, extracts routes)
             order = self.parser.parse(text, author_username=sender_username)
             if not order:
                 clean_preview = text.replace('\n', ' ').strip()[:45]
-                logger.info(f"🚫 [NLP] Haydovchi e'loni/spam rad etildi ('{chat_title}'): \"{clean_preview}...\"")
+                logger.info(f"[NLP] Haydovchi e'loni/spam rad etildi ('{chat_title}'): \"{clean_preview}...\"")
                 return None
 
         phone = order.get("phone_number")
         
         # Second-pass phone-based deduplication
         if phone and self.dedup.is_duplicate(text, phone=phone):
-            logger.info(f"🔁 [DEDUP_PHONE] Raqam ({phone}) bo'yicha takroriy xabar e'tiborsiz qoldirildi ('{chat_title}')")
+            logger.info(f"[DEDUP_PHONE] Raqam ({phone}) bo'yicha takroriy xabar e'tiborsiz qoldirildi ('{chat_title}')")
             return None
 
         # Record into deduplication cache
@@ -169,6 +174,7 @@ class HarvesterListener:
             # Hash already existed in DB
             return None
 
+        self._recent_orders_count += 1
         order["id"] = order_id
         orig_name = (order.get("origin") or {}).get("name", "?")
         dest_name = (order.get("destination") or order.get("dest") or {}).get("name", "?")
@@ -205,6 +211,7 @@ class HarvesterListener:
 
             # Record raw message seen in group telemetry buffer
             self.record_activity(chat_id, seen=1)
+            self._recent_seen_count += 1
 
             # 1. Message freshness guard: Drop messages older than 300 seconds (5 minutes)
             transit_lag_seconds: Optional[float] = None
@@ -224,22 +231,24 @@ class HarvesterListener:
 
             # 2. Fast in-memory deduplication check (<0.05ms)
             if self.dedup.is_duplicate(raw_text):
+                self._recent_dedup_count += 1
                 group_info = self._monitored_groups_cache.get(chat_id, {})
                 title = group_info.get("title") or str(chat_id)
                 clean_preview = raw_text.replace('\n', ' ').strip()[:45]
-                logger.info(f"🔁 [DEDUP] Takroriy xabar e'tiborsiz qoldirildi ('{title}'): \"{clean_preview}...\"")
+                logger.info(f"[DEDUP] Takroriy xabar e'tiborsiz qoldirildi ('{title}'): \"{clean_preview}...\"")
                 return
 
             # 3. Fast in-memory NLP parsing (<0.06ms)
             # Rejects 95%+ of messages (driver ads, spam, greetings) immediately!
             order = self.parser.parse(raw_text)
             if not order:
+                self._recent_spam_count += 1
                 # Driver ad / spam rejected!
                 self.record_activity(chat_id, spam=1)
                 group_info = self._monitored_groups_cache.get(chat_id, {})
                 title = group_info.get("title") or str(chat_id)
                 clean_preview = raw_text.replace('\n', ' ').strip()[:45]
-                logger.debug(f"🚫 [NLP] Haydovchi e'loni/spam rad etildi ('{title}'): \"{clean_preview}...\"")
+                logger.debug(f"[NLP] Haydovchi e'loni/spam rad etildi ('{title}'): \"{clean_preview}...\"")
                 return
 
             # Message is a verified passenger or cargo order!
@@ -339,7 +348,8 @@ class HarvesterListener:
             title = group_info.get("title") or str(chat_id)
             c = info["count"]
             max_min = info["max_lag"] / 60.0
-            logger.info(f"⏩ [STALE] {c} ta eskirgan xabar o'tkazib yuborildi ('{title}' | Lag: ~{max_min:.1f} daqiqa)")
+            now_str = datetime.now().strftime("%H:%M:%S")
+            logger.info(f"[STALE] ({now_str}) {c} ta eskirgan xabar o'tkazib yuborildi ('{title}' | Lag: ~{max_min:.1f} daqiqa)")
 
     async def _active_poller_loop(self):
         """
@@ -351,6 +361,7 @@ class HarvesterListener:
         while self._is_running:
             try:
                 sweep_start = time.time()
+                cycle_new_msgs = 0
                 if not self._is_running or not self.client or not self.client.is_connected():
                     await asyncio.sleep(5)
                     continue
@@ -367,9 +378,31 @@ class HarvesterListener:
                             msgs = msgs_call
 
                         if msgs:
-                            # Process in chronological order (oldest to newest)
-                            for msg in reversed(msgs):
-                                asyncio.create_task(self._process_event(msg, cid))
+                            last_known_id = self._last_seen_msg_ids.get(cid)
+
+                            # First time inspecting this group: establish baseline watermark
+                            if last_known_id is None:
+                                max_id = max(getattr(m, "id", 0) for m in msgs)
+                                self._last_seen_msg_ids[cid] = max_id
+                                # Only process messages that are ACTUALLY fresh (<300s) right now;
+                                # silently ignore historical messages from hours/days ago without false [STALE] spam
+                                for msg in reversed(msgs):
+                                    msg_date = getattr(msg, "date", None)
+                                    if msg_date:
+                                        now_utc = datetime.now(timezone.utc)
+                                        if getattr(msg_date, "tzinfo", None) is None:
+                                            msg_date = msg_date.replace(tzinfo=timezone.utc)
+                                        if (now_utc - msg_date).total_seconds() <= 300:
+                                            cycle_new_msgs += 1
+                                            asyncio.create_task(self._process_event(msg, cid))
+                            else:
+                                # Normal sweep: ONLY process messages strictly NEWER than last_known_id!
+                                new_msgs = [m for m in msgs if getattr(m, "id", 0) > last_known_id]
+                                if new_msgs:
+                                    cycle_new_msgs += len(new_msgs)
+                                    self._last_seen_msg_ids[cid] = max(getattr(m, "id", 0) for m in new_msgs)
+                                    for msg in reversed(new_msgs):
+                                        asyncio.create_task(self._process_event(msg, cid))
 
                     except FloodWaitError as e:
                         logger.warning(f"Telegram FloodWait in harvester active poller: sleeping {e.seconds}s")
@@ -385,6 +418,12 @@ class HarvesterListener:
                 # Rest for the remainder of the 60-second cycle
                 elapsed = time.time() - sweep_start
                 sleep_remainder = max(5.0, 60.0 - elapsed)
+                now_str = datetime.now().strftime("%H:%M:%S")
+                logger.info(
+                    f"[POLLER] ({now_str}) Cycle finished in {elapsed:.1f}s | "
+                    f"Checked {len(chat_ids)} groups | New msgs: {cycle_new_msgs} | "
+                    f"Sleeping {sleep_remainder:.1f}s"
+                )
                 await asyncio.sleep(sleep_remainder)
 
             except asyncio.CancelledError:
@@ -392,6 +431,34 @@ class HarvesterListener:
             except Exception as e:
                 logger.error(f"Unexpected error in harvester active poller loop: {e}", exc_info=True)
                 await asyncio.sleep(5)
+
+    async def _summary_loop(self):
+        """Emits a 60-second summary of harvester throughput without emojis."""
+        while self._is_running:
+            try:
+                await asyncio.sleep(60)
+                if not self._is_running:
+                    break
+                seen = self._recent_seen_count
+                spam = self._recent_spam_count
+                dedup = self._recent_dedup_count
+                orders = self._recent_orders_count
+
+                self._recent_seen_count = 0
+                self._recent_spam_count = 0
+                self._recent_dedup_count = 0
+                self._recent_orders_count = 0
+
+                now_str = datetime.now().strftime("%H:%M:%S")
+                logger.info(
+                    f"[HARVESTER] ({now_str}) Summary: Seen: {seen} msgs | "
+                    f"Driver Ads/Spam: {spam} | Duplicates: {dedup} | "
+                    f"Orders Captured: {orders}"
+                )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in harvester summary loop: {e}")
 
     def setup_event_handlers(self):
         """Attaches Telethon events.NewMessage handler to the client."""
@@ -414,7 +481,7 @@ class HarvesterListener:
             asyncio.create_task(self._process_event(event, chat_id))
 
     async def start(self):
-        """Starts the harvester listener, stats flush loop, and hybrid active poller loop."""
+        """Starts the harvester listener, stats flush loop, active poller loop, and 60s summary loop."""
         self._is_running = True
         await self.reload_monitored_groups()
         self.setup_event_handlers()
@@ -422,10 +489,12 @@ class HarvesterListener:
             self._flush_task = asyncio.create_task(self._flush_loop())
         if self._pulse_task is None or self._pulse_task.done():
             self._pulse_task = asyncio.create_task(self._active_poller_loop())
+        if self._summary_task is None or self._summary_task.done():
+            self._summary_task = asyncio.create_task(self._summary_loop())
         logger.info("HarvesterListener started successfully.")
 
     async def stop(self):
-        """Stops the harvester listener, active poller loop, and flushes pending telemetry."""
+        """Stops the harvester listener, active poller loop, summary loop, and flushes pending telemetry."""
         self._is_running = False
         if self._flush_task and not self._flush_task.done():
             self._flush_task.cancel()
@@ -433,5 +502,8 @@ class HarvesterListener:
         if self._pulse_task and not self._pulse_task.done():
             self._pulse_task.cancel()
             self._pulse_task = None
+        if self._summary_task and not self._summary_task.done():
+            self._summary_task.cancel()
+            self._summary_task = None
         await self.flush_stats_buffer()
         logger.info("HarvesterListener stopped.")
