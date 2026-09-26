@@ -45,6 +45,7 @@ class AdminStates(StatesGroup):
     waiting_for_broadcast = State()
     waiting_for_group_target = State()
     waiting_for_group_broadcast = State()
+    waiting_for_plan_price = State()
 
 # Pricing definition (months -> (amount_uzs, display_title, bonus_days))
 PRICING_PLANS = {
@@ -54,7 +55,11 @@ PRICING_PLANS = {
     12: (225000, "12 Oy + 1 Oy Bepul 🔥", 390)
 }
 
-def calculate_effective_plan_prices(campaign: Optional[Dict[str, Any]] = None, promo: Optional[Dict[str, Any]] = None) -> Dict[int, Dict[str, Any]]:
+def calculate_effective_plan_prices(
+    campaign: Optional[Dict[str, Any]] = None,
+    promo: Optional[Dict[str, Any]] = None,
+    base_plans: Optional[Dict[int, Dict[str, Any]]] = None
+) -> Dict[int, Dict[str, Any]]:
     """
     Calculates final prices, original prices, badges, and detailed calculation breakdowns
     for each plan (1, 3, 6, 12).
@@ -69,7 +74,16 @@ def calculate_effective_plan_prices(campaign: Optional[Dict[str, Any]] = None, p
     promo_plans = promo.get("applicable_plans", "ALL") if promo else "ALL"
     promo_plan_list = [p.strip() for p in promo_plans.split(",")] if promo_plans != "ALL" else ["1", "3", "6", "12"]
     
-    for months, (base_price, title, bonus_days) in PRICING_PLANS.items():
+    # Source plans either from dynamic base_plans or fallback PRICING_PLANS
+    plans_iter = []
+    if base_plans:
+        for months, p_info in sorted(base_plans.items()):
+            plans_iter.append((months, p_info.get("price", 25000), p_info.get("title", f"{months} Oy"), p_info.get("days", months * 30)))
+    else:
+        for months, (base_price, title, bonus_days) in PRICING_PLANS.items():
+            plans_iter.append((months, base_price, title, bonus_days))
+
+    for months, base_price, title, bonus_days in plans_iter:
         price = base_price
         tags = []
         
@@ -203,19 +217,25 @@ async def render_dashboard(message_or_call, user_id: int, state: FSMContext = No
     sub_label = t("Obuna holati", user_script)
     acc_label = t("Akkaunt holati", user_script)
 
-    text = (
-        f"<b>{html.escape(greeting)}</b>\n\n"
-        f"👤 <b>{html.escape(user_label)}:</b> {html.escape(full_name)} (ID: <code>{user_id}</code>)\n"
-        f"💳 <b>{html.escape(sub_label)}:</b> {sub_badge}\n"
-        f"📱 <b>{html.escape(acc_label)}:</b> {auth_status}"
-    )
-    
-    if not is_auth:
-        tips_title = t("💡 Boshlash uchun:", user_script)
-        step1 = t("1. Quyidagi «📱 Akkauntni ulash» tugmasini bosing.", user_script)
-        step2 = t("2. Telefon raqamingiz va Telegram kodini kiriting.", user_script)
-        step3 = t("3. Buyurtmalar yoki E'lon tarqatish xizmatidan foydalaning!", user_script)
-        text += f"\n\n{tips_title}\n{step1}\n{step2}\n{step3}"
+    if user_id == ADMIN_ID:
+        text = (
+            f"<b>{html.escape(greeting)}</b>\n\n"
+            f"👤 <b>{html.escape(user_label)}:</b> {html.escape(full_name)} (ID: <code>{user_id}</code>)\n"
+            f"💳 <b>{html.escape(sub_label)}:</b> {sub_badge}"
+        )
+    else:
+        text = (
+            f"<b>{html.escape(greeting)}</b>\n\n"
+            f"👤 <b>{html.escape(user_label)}:</b> {html.escape(full_name)} (ID: <code>{user_id}</code>)\n"
+            f"💳 <b>{html.escape(sub_label)}:</b> {sub_badge}\n"
+            f"📱 <b>{html.escape(acc_label)}:</b> {auth_status}"
+        )
+        if not is_auth:
+            tips_title = t("💡 Boshlash uchun:", user_script)
+            step1 = t("1. Quyidagi «📱 Akkauntni ulash» tugmasini bosing.", user_script)
+            step2 = t("2. Telefon raqamingiz va Telegram kodini kiriting.", user_script)
+            step3 = t("3. Buyurtmalar yoki E'lon tarqatish xizmatidan foydalaning!", user_script)
+            text += f"\n\n{tips_title}\n{step1}\n{step2}\n{step3}"
         
     can_trial = await db.can_user_claim_trial(user_id)
     markup = kb.main_dashboard_kb(is_authenticated=is_auth, script=user_script, can_claim_trial=can_trial)
@@ -373,7 +393,11 @@ async def render_admin_dashboard(message_or_call, state: FSMContext = None):
 @router.message(Command("admin"))
 async def start_cmd(message: Message, state: FSMContext):
     user_id = message.from_user.id
-    if user_id == ADMIN_ID and message.text and "/admin" in message.text:
+    if user_id == ADMIN_ID:
+        if state:
+            await state.clear()
+        user_script = await db.get_user_script(user_id)
+        await message.answer("🚕 <b>Taksi Xabarchi SuperAdmin</b>", reply_markup=kb.main_reply_kb(user_script), parse_mode="HTML")
         await render_admin_dashboard(message, state)
         return
 
@@ -384,8 +408,7 @@ async def start_cmd(message: Message, state: FSMContext):
     )
     
     user_script = await db.get_user_script(user_id)
-    is_auth = auth_flow.is_user_authenticated(user_id)
-    reply_markup = kb.main_reply_kb(user_script) if is_auth else kb.unauth_reply_kb(user_script)
+    reply_markup = kb.main_reply_kb(user_script)
 
     if is_new:
         welcome_text = (
@@ -434,8 +457,7 @@ async def toggle_script_call(call: CallbackQuery):
     new_script = "cyr" if current_script == "lat" else "lat"
     await db.set_user_script(user_id, new_script)
     
-    is_auth = auth_flow.is_user_authenticated(user_id)
-    reply_markup = kb.main_reply_kb(new_script) if is_auth else kb.unauth_reply_kb(new_script)
+    reply_markup = kb.main_reply_kb(new_script)
     
     alert_txt = "Алифбо: Кирилл танланди 🇺🇿" if new_script == "cyr" else "Alifbo: Lotin tanlandi 🇺🇿"
     await safe_answer(call, alert_txt)
@@ -497,8 +519,7 @@ async def cancel_reply_handler(message: Message, state: FSMContext):
     user_script = await db.get_user_script(user_id)
     await auth_flow.cancel_auth_session(user_id)
     await state.clear()
-    is_auth = auth_flow.is_user_authenticated(user_id)
-    reply_markup = kb.main_reply_kb(user_script) if is_auth else kb.unauth_reply_kb(user_script)
+    reply_markup = kb.main_reply_kb(user_script)
     await message.answer(t("Amal bekor qilindi.", user_script), reply_markup=reply_markup)
     await render_dashboard(message, user_id, state)
 
@@ -529,7 +550,7 @@ async def process_phone_input(message: Message, state: FSMContext):
     
     if message.text in ("❌ Bekor qilish", "❌ Бекор қилиш"):
         await state.clear()
-        reply_markup = kb.unauth_reply_kb(user_script)
+        reply_markup = kb.main_reply_kb(user_script)
         await message.answer(t("Ulanish bekor qilindi.", user_script), reply_markup=reply_markup)
         await render_dashboard(message, user_id, state)
         return
@@ -646,6 +667,12 @@ async def cancel_auth_call(call: CallbackQuery, state: FSMContext):
     await state.clear()
     with contextlib.suppress(TelegramBadRequest):
         await call.message.edit_text(t("Akkaunt ulash bekor qilindi.", user_script))
+    with contextlib.suppress(Exception):
+        await call.bot.send_message(
+            chat_id=user_id,
+            text=f"« {t('Asosiy menyu', user_script)}",
+            reply_markup=kb.main_reply_kb(user_script)
+        )
     await render_dashboard(call, user_id, state)
     await safe_answer(call)
 
@@ -685,7 +712,7 @@ async def logout_confirmed_call(call: CallbackQuery, bot: Bot, state: FSMContext
         await call.bot.send_message(
             chat_id=user_id,
             text=f"🔌 {t('Akkaunt uzildi.', user_script)}",
-            reply_markup=kb.unauth_reply_kb(user_script)
+            reply_markup=kb.main_reply_kb(user_script)
         )
         
     await render_dashboard(call, user_id, state)
@@ -701,7 +728,8 @@ async def show_plans_call(call: CallbackQuery, state: Optional[FSMContext] = Non
         state_data = await state.get_data()
         applied_promo = state_data.get("applied_promo")
         
-    plan_prices = calculate_effective_plan_prices(campaign, applied_promo)
+    db_plans = await db.get_pricing_plans()
+    plan_prices = calculate_effective_plan_prices(campaign, applied_promo, base_plans=db_plans)
     
     banner = ""
     if campaign:
@@ -789,7 +817,8 @@ async def select_plan_call(call: CallbackQuery, state: FSMContext):
     state_data = await state.get_data()
     applied_promo = state_data.get("applied_promo")
     
-    plan_prices = calculate_effective_plan_prices(campaign, applied_promo)
+    db_plans = await db.get_pricing_plans()
+    plan_prices = calculate_effective_plan_prices(campaign, applied_promo, base_plans=db_plans)
     plan_info = plan_prices.get(months, {"price": 25000, "base_price": 25000, "title": f"{months} Oy", "tag": "", "discount_details": {}})
     amount_uzs = plan_info["price"]
     base_amount_uzs = plan_info["base_price"]
@@ -1844,7 +1873,8 @@ async def process_promocode_input(message: Message, state: FSMContext):
     # PERCENT or FIXED discount applied to cart
     await state.update_data(applied_promo=promo)
     campaign = await db.get_active_campaign_discount()
-    plan_prices = calculate_effective_plan_prices(campaign, promo)
+    db_plans = await db.get_pricing_plans()
+    plan_prices = calculate_effective_plan_prices(campaign, promo, base_plans=db_plans)
     
     text = (
         f"{msg}\n\n"
@@ -1868,7 +1898,8 @@ async def promo_command(message: Message, state: FSMContext):
             return
         await state.update_data(applied_promo=promo)
         campaign = await db.get_active_campaign_discount()
-        plan_prices = calculate_effective_plan_prices(campaign, promo)
+        db_plans = await db.get_pricing_plans()
+        plan_prices = calculate_effective_plan_prices(campaign, promo, base_plans=db_plans)
         await message.answer(f"{msg}\n\n👇 Tariflar:", reply_markup=kb.pricing_plans_kb(plan_prices), parse_mode="Markdown")
     else:
         await state.set_state(PromoStates.waiting_for_promocode)
@@ -2004,17 +2035,102 @@ async def admin_newpromo_cmd(message: Message):
 
 # ==================== SUPERADMIN PLANS & PRICING MANAGEMENT ====================
 async def render_admin_plans(message_or_call):
+    plans = await db.get_pricing_plans()
+
+    text = (
+        "💳 **Asosiy Tarif Rejalari Boshqaruvi**\n\n"
+        "Platformadagi barcha haydovchilar uchun o'rnatilgan asosiy obuna narxlari:\n\n"
+    )
+    for m in sorted(plans.keys()):
+        p = plans[m]
+        tag_str = f" — *{p['tag']}*" if p.get("tag") else ""
+        text += f"• **{p.get('title', f'{m} Oy')}**: **{p.get('price', 0):,} so'm** ({p.get('days', m*30)} kun){tag_str}\n"
+
+    text += (
+        "\n⚙️ *Narxni o'zgartirish uchun kerakli tarif tugmasini bosing:*"
+    )
+
+    markup = kb.admin_plans_editor_kb(plans)
+    if isinstance(message_or_call, Message):
+        await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        with contextlib.suppress(TelegramBadRequest):
+            await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_plans")
+async def admin_plans_call(call: CallbackQuery, state: Optional[FSMContext] = None):
+    if call.from_user.id != ADMIN_ID:
+        return
+    if state:
+        await state.clear()
+    await render_admin_plans(call)
+    await safe_answer(call)
+
+@router.message(Command("plans"))
+async def admin_plans_cmd(message: Message, state: Optional[FSMContext] = None):
+    if message.from_user.id != ADMIN_ID:
+        return
+    if state:
+        await state.clear()
+    await render_admin_plans(message)
+
+@router.callback_query(F.data.startswith("admin_edit_plan_"))
+async def admin_edit_plan_call(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    try:
+        months = int(call.data.split("_")[-1])
+    except ValueError:
+        return
+    await state.set_state(AdminStates.waiting_for_plan_price)
+    await state.update_data(edit_plan_months=months)
+    plans = await db.get_pricing_plans()
+    curr_plan = plans.get(months, {})
+    curr_price = curr_plan.get("price", 0)
+
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Bekor qilish", callback_data="admin_plans")]
+    ])
+    text = (
+        f"✏️ **{curr_plan.get('title', f'{months} Oy')} narxini o'zgartirish**\n\n"
+        f"Hozirgi narx: **{curr_price:,} so'm**\n\n"
+        f"Iltimos, ushbu tarif uchun yangi narxni so'mda kiriting (faqat raqam, masalan: `30000`):"
+    )
+    with contextlib.suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=cancel_kb, parse_mode="Markdown")
+    await safe_answer(call)
+
+@router.message(AdminStates.waiting_for_plan_price, F.text)
+async def process_admin_plan_price(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    if message.text in ("❌ Bekor qilish", "« Bekor qilish", "/cancel", "bekor"):
+        await state.clear()
+        await render_admin_plans(message)
+        return
+
+    clean_val = re.sub(r"[^\d]", "", message.text)
+    if not clean_val or int(clean_val) < 1000:
+        await message.answer("⚠️ Iltimos, to'g'ri narx kiriting (kamida 1,000 so'm, masalan: `35000`):")
+        return
+
+    new_price = int(clean_val)
+    data = await state.get_data()
+    months = data.get("edit_plan_months", 1)
+    await state.clear()
+
+    await db.update_pricing_plan(months, price=new_price)
+    await message.answer(f"✅ **{months} oylik tarif narxi muvaffaqiyatli {new_price:,} so'm qilib belgilandi!**", parse_mode="Markdown")
+    await render_admin_plans(message)
+
+# ==================== SUPERADMIN DISCOUNT & PROMO HUBS ====================
+async def render_admin_promos(message_or_call):
     camp = await db.get_active_campaign_discount()
     promos = await db.get_promocodes()
     active_promos = [p for p in promos if p.get("status_badge") == "🟢 FAOL"]
 
     text = (
-        "💳 **Tariflar va To'lov Sozlamalari**\n\n"
-        "📦 **Standart Tarif Rejalari:**\n"
-        "• 1 oylik obuna: **25,000 so'm** (30 kun)\n"
-        "• 3 oylik obuna: **65,000 so'm** (90 kun) — *Tejamkor*\n"
-        "• 6 oylik obuna: **120,000 so'm** (180 kun) — *Optima*\n"
-        "• 12 oylik obuna: **225,000 so'm** (390 kun) — *+1 oy bepul 🔥*\n\n"
+        "🏷 **Chegirma va Promokodlar Boshqaruvi**\n\n"
     )
     if camp:
         d = camp.get("plan_discounts", {})
@@ -2037,31 +2153,18 @@ async def render_admin_plans(message_or_call):
         "• `/discounts` — Barcha chegirma va promolarni ko'rish"
     )
 
-    markup = kb.admin_plans_kb(has_active_discount=bool(camp))
+    markup = kb.admin_promos_kb(has_active_discount=bool(camp))
     if isinstance(message_or_call, Message):
         await message_or_call.answer(text, reply_markup=markup, parse_mode="Markdown")
     else:
         with contextlib.suppress(TelegramBadRequest):
             await message_or_call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
 
-@router.callback_query(F.data == "admin_plans")
-async def admin_plans_call(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    await render_admin_plans(call)
-    await safe_answer(call)
-
-@router.message(Command("plans"))
-async def admin_plans_cmd(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    await render_admin_plans(message)
-
 @router.callback_query(F.data == "admin_promos")
 async def admin_promos_call(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
-    await render_admin_plans(call)
+    await render_admin_promos(call)
     await safe_answer(call)
 
 @router.callback_query(F.data == "admin_stop_discount")
@@ -2070,7 +2173,7 @@ async def admin_stop_discount_call(call: CallbackQuery):
         return
     await db.stop_campaign_discount()
     await safe_answer(call, "🛑 Aksiya to'xtatildi!", show_alert=True)
-    await render_admin_plans(call)
+    await render_admin_promos(call)
 
 @router.callback_query(F.data == "admin_set_discount_info")
 async def admin_set_discount_info_call(call: CallbackQuery):
@@ -2387,19 +2490,26 @@ async def claim_order_call(call: CallbackQuery):
             current_text = call.message.html_text or call.message.text or ""
             claimer_name = call.from_user.full_name
             if is_group:
+                # Mask phone numbers and contact handles in the group card once claimed
+                masked_group_text = re.sub(r"Tel:\s*\+?[\d\s\-]+", "Tel: 🔒 [Band qilindi — berkitildi]", current_text)
+                masked_group_text = re.sub(r"Lichka:\s*<a[^>]*>.*?</a>", "Lichka: 🔒 [Berkitildi]", masked_group_text)
+                masked_group_text = re.sub(r"(\+?998[\s\-]?)?\d{2}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", "••••••", masked_group_text)
+
                 claimed_banner = f"\n\n<b>✅ BAND QILINDI!</b>\n<i>Haydovchi: <a href=\"tg://user?id={user_id}\">{claimer_name}</a></i>"
                 new_kb = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="🔒 Band qilindi", callback_data="noop")]
                 ])
+                if "BAND QILINDI" not in current_text and "SIZ BU BUYURTMANI QABUL QILDINGIZ" not in current_text:
+                    new_text = masked_group_text + claimed_banner
+                    await call.message.edit_text(new_text, reply_markup=new_kb, parse_mode="HTML")
             else:
                 claimed_banner = "\n\n<b>✅ SIZ BU BUYURTMANI QABUL QILDINGIZ!</b>\n<i>Mijoz bilan bog'laning.</i>"
                 new_kb = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="✅ Qabul qilingan", callback_data="noop")]
                 ])
-
-            if "BAND QILINDI" not in current_text and "SIZ BU BUYURTMANI QABUL QILDINGIZ" not in current_text:
-                new_text = current_text + claimed_banner
-                await call.message.edit_text(new_text, reply_markup=new_kb, parse_mode="HTML")
+                if "BAND QILINDI" not in current_text and "SIZ BU BUYURTMANI QABUL QILDINGIZ" not in current_text:
+                    new_text = current_text + claimed_banner
+                    await call.message.edit_text(new_text, reply_markup=new_kb, parse_mode="HTML")
 
         # Send private confirmation DM to the winning driver with complete client info
         order_dict = result.get("order") or {}

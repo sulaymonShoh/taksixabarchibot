@@ -33,11 +33,12 @@ def test_web_suite():
     print("TEST SUITE: PHASE 4 (FastAPI Web UI & Telegram Mini App)")
     print("=" * 60)
 
-    # 1. Mini App public access
-    res = client.get("/miniapp")
-    assert res.status_code == 200
-    assert "Taksi Xabarchi Mini App" in res.text
-    print(">>> 1. [PASS] Public Mini App endpoint rendered correctly.")
+    # 1. Plans view and API access
+    auth = ("admin", "admin123")
+    res_plans = client.get("/plans", auth=auth)
+    assert res_plans.status_code == 200
+    assert "Tarif Rejalari" in res_plans.text
+    print(">>> 1. [PASS] Pricing Plans management view rendered correctly.")
 
     # 2. Unauthorized access rejected
     res_unauth = client.get("/")
@@ -81,11 +82,10 @@ def test_web_suite():
     assert res_app.json()["success"] is True
     print(">>> 8. [PASS] Payment approval API verified.")
 
-    # 9. Space Grotesk font & Theme toggle verified in templates
-    assert "Space Grotesk" in res_dash.text
+    # 9. SF Pro Display font & Theme toggle verified in templates
+    assert "SF Pro Display" in res_dash.text
     assert "toggleTheme" in res_dash.text
-    assert "Space Grotesk" in res.text # In miniapp too
-    print(">>> 9. [PASS] Space Grotesk font and light/dark theme toggle verified.")
+    print(">>> 9. [PASS] SF Pro Display font stack and light/dark theme toggle verified.")
 
     # 10. Filters verified on Users and Payments pages
     assert "applyUserFilters" in res_users.text
@@ -113,6 +113,37 @@ def test_web_suite():
     assert "total_revenue" in stats_data
     assert "monthly_breakdown" in stats_data
     print(">>> 13. [PASS] Finance stats API verified.")
+
+    # 14. Harvester 3 distinct subpages
+    res_h_groups = client.get("/harvester", auth=auth)
+    assert res_h_groups.status_code == 200
+    assert "Guruhlar Boshqaruvi" in res_h_groups.text
+
+    res_h_analytics = client.get("/harvester/analytics", auth=auth)
+    assert res_h_analytics.status_code == 200
+    assert "Sifat & Analitika" in res_h_analytics.text
+
+    res_h_orders = client.get("/harvester/orders", auth=auth)
+    assert res_h_orders.status_code == 200
+    assert "Buyurtmalar Jonli Oqimi" in res_h_orders.text
+    print(">>> 14. [PASS] Harvester 3 subpages (Groups, Analytics, Orders) verified.")
+
+    # 15. Base pricing plans API
+    res_plan_update = client.post("/api/admin/plans", auth=auth, json={
+        "months": 1,
+        "price": 30000,
+        "days": 30,
+        "title": "1 Oy Yangi",
+        "tag": "Maxsus"
+    })
+    assert res_plan_update.status_code == 200
+    assert res_plan_update.json()["success"] is True
+
+    res_plans_get = client.get("/api/admin/plans", auth=auth)
+    assert res_plans_get.status_code == 200
+    plans_data = res_plans_get.json()
+    assert plans_data["1"]["price"] == 30000
+    print(">>> 15. [PASS] Dynamic pricing plans update API verified.")
 
     if os.path.exists("data/test_web_suite.db"):
         os.remove("data/test_web_suite.db")

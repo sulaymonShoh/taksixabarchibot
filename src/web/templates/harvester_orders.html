@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Buyurtmalar Oqimi — Harvester Radar{% endblock %}
+{% block content %}
+<div class="p-6 md:p-8 max-w-8xl mx-auto w-full space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <div class="flex items-center space-x-2.5">
+                <h2 class="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Buyurtmalar Jonli Oqimi</h2>
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">Live Stream</span>
+            </div>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Guruhlardan NLP filtri orqali ajratib olinayotgan real mijoz va pochta buyurtmalari oqimi</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button onclick="window.location.reload()" class="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-sm rounded-xl transition shadow-sm flex items-center space-x-2 cursor-pointer">
+                <i class="fa-solid fa-arrows-rotate"></i>
+                <span>Yangilash</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Sub-navigation Tabs -->
+    <div class="flex items-center space-x-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+        <a href="/harvester" class="px-4 py-2 rounded-xl text-sm font-semibold transition text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2">
+            <i class="fa-solid fa-layer-group"></i>
+            <span>Guruhlar Boshqaruvi</span>
+        </a>
+        <a href="/harvester/analytics" class="px-4 py-2 rounded-xl text-sm font-semibold transition text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2">
+            <i class="fa-solid fa-chart-pie"></i>
+            <span>Sifat & Analitika</span>
+        </a>
+        <a href="/harvester/orders" class="px-4 py-2 rounded-xl text-sm font-semibold transition bg-amber-500 text-slate-950 shadow-sm flex items-center space-x-2">
+            <i class="fa-solid fa-bolt"></i>
+            <span>Buyurtmalar Oqimi</span>
+            <span class="px-1.5 py-0.2 rounded-full text-xs font-bold bg-slate-950/20 text-slate-950">{{ orders|length }}</span>
+        </a>
+    </div>
+
+    <!-- Quick Stats Metric Bar -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm dark:shadow-xl">
+            <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Jami Tutib Olingan</div>
+            <div class="text-xl font-bold text-slate-900 dark:text-white mt-1">{{ stats.total_orders or 0 }} ta</div>
+        </div>
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm dark:shadow-xl">
+            <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Bugun Olingan</div>
+            <div class="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">{{ stats.today_orders or 0 }} ta</div>
+        </div>
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm dark:shadow-xl">
+            <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Yo'lovchilar</div>
+            <div class="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">{{ stats.passenger_orders or 0 }} ta</div>
+        </div>
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm dark:shadow-xl">
+            <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pochtalar</div>
+            <div class="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">{{ stats.cargo_orders or 0 }} ta</div>
+        </div>
+    </div>
+
+    <!-- Live Filters & Search Bar -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm dark:shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div class="flex-1 relative">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-xs text-slate-400"></i>
+            <input type="text" id="orderSearchInput" onkeyup="filterOrdersTable()" placeholder="Yo'nalish, shahar yoki tuman bo'yicha qidirish..." class="w-full pl-9 pr-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500" />
+        </div>
+        <div class="flex items-center space-x-2 flex-wrap sm:flex-nowrap">
+            <select id="typeFilter" onchange="filterOrdersTable()" class="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none">
+                <option value="ALL">Barcha Turlar</option>
+                <option value="PASSENGER">👤 Yo'lovchi</option>
+                <option value="CARGO">📦 Pochta</option>
+            </select>
+            <select id="statusFilter" onchange="filterOrdersTable()" class="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none">
+                <option value="ALL">Barcha Holatlar</option>
+                <option value="AVAILABLE">🟢 Ochiq</option>
+                <option value="CLAIMED">✅ Band qilingan</option>
+                <option value="TAKEN_ELSEWHERE">⚪️ Taksi topilgan</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Orders Stream Table -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl overflow-hidden shadow-sm dark:shadow-xl">
+        <div class="overflow-x-auto">
+            <table id="ordersTable" class="w-full text-left text-sm">
+                <thead class="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                        <th class="px-4 py-3.5">ID / Vaqt</th>
+                        <th class="px-4 py-3.5">Holat</th>
+                        <th class="px-4 py-3.5">Turi</th>
+                        <th class="px-4 py-3.5">Yo'nalish</th>
+                        <th class="px-4 py-3.5">Mijoz / Aloqa</th>
+                        <th class="px-4 py-3.5">Manba Guruh</th>
+                        <th class="px-4 py-3.5">Xabar Matni</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-700 dark:text-slate-300">
+                    {% for o in orders %}
+                    <tr class="order-row hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition" data-type="{{ o.order_type }}" data-status="{{ o.status }}" data-route="{{ o.origin_district or o.origin_region or '' }} {{ o.dest_district or o.dest_region or '' }} {{ o.raw_text or '' }}">
+                        <td class="px-4 py-3.5 whitespace-nowrap">
+                            <span class="font-mono font-bold text-slate-900 dark:text-white">#{{ o.id }}</span>
+                            <div class="text-[11px] text-slate-400">{{ o.created_at[:16] if o.created_at else '' }}</div>
+                        </td>
+                        <td class="px-4 py-3.5 whitespace-nowrap">
+                            {% if o.status == 'CLAIMED' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30" title="Haydovchi #{{ o.claimed_by }} tomonidan olingan">
+                                <i class="fa-solid fa-lock mr-1 text-[10px]"></i> Band qilindi
+                            </span>
+                            {% elif o.status == 'TAKEN_ELSEWHERE' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-slate-500/15 text-slate-500 border border-slate-500/30" title="Mijoz taksi topgan">
+                                <i class="fa-solid fa-check mr-1 text-[10px]"></i> Olingan
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                <i class="fa-solid fa-bolt mr-1 text-[10px]"></i> Ochiq
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3.5 whitespace-nowrap">
+                            {% if o.order_type == 'PASSENGER' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30">
+                                👤 {{ o.passenger_count or 1 }} kishi
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                📦 Pochta
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3.5 font-semibold text-slate-900 dark:text-white whitespace-nowrap">
+                            <span class="text-emerald-600 dark:text-emerald-400">{{ o.origin_district or o.origin_region or '?' }}</span>
+                            <i class="fa-solid fa-arrow-right mx-1.5 text-slate-400 text-xs"></i>
+                            <span class="text-blue-600 dark:text-blue-400">{{ o.dest_district or o.dest_region or 'Toshkent' }}</span>
+                        </td>
+                        <td class="px-4 py-3.5 whitespace-nowrap">
+                            {% if o.phone_number %}
+                            <div class="font-mono font-bold text-xs text-slate-900 dark:text-white">{{ o.phone_number }}</div>
+                            {% endif %}
+                            {% if o.telegram_username %}
+                            <a href="https://t.me/{{ o.telegram_username.replace('@', '') }}" target="_blank" class="text-xs text-blue-500 hover:underline">
+                                {{ o.telegram_username }}
+                            </a>
+                            {% endif %}
+                            {% if not o.phone_number and not o.telegram_username %}
+                            <span class="text-xs text-slate-400 italic">Matnda ko'rsatilgan</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3.5 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                            {{ o.source_group_title or 'Telegram Superguruh' }}
+                        </td>
+                        <td class="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300 max-w-xs truncate" title="{{ o.raw_text }}">
+                            <i>"{{ o.raw_text }}"</i>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="px-4 py-8 text-center text-slate-400">
+                            Hozircha buyurtmalar oqimi mavjud emas. Superguruhlar ulangach, buyurtmalar bu yerda jonli paydo bo'ladi.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+function filterOrdersTable() {
+    const q = document.getElementById('orderSearchInput').value.toLowerCase();
+    const type = document.getElementById('typeFilter').value;
+    const status = document.getElementById('statusFilter').value;
+    const rows = document.querySelectorAll('.order-row');
+
+    rows.forEach(r => {
+        const rowType = r.getAttribute('data-type');
+        const rowStatus = r.getAttribute('data-status');
+        const rowRoute = r.getAttribute('data-route').toLowerCase();
+
+        const matchQ = !q || rowRoute.includes(q);
+        const matchType = type === 'ALL' || rowType === type;
+        const matchStatus = status === 'ALL' || (status === 'AVAILABLE' && (!rowStatus || rowStatus === 'AVAILABLE')) || rowStatus === status;
+
+        if (matchQ && matchType && matchStatus) {
+            r.style.display = '';
+        } else {
+            r.style.display = 'none';
+        }
+    });
+}
+</script>
+{% endblock %}

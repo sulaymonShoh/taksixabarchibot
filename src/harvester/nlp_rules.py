@@ -69,7 +69,13 @@ DRIVER_AD_PHRASES = frozenset([
     "zaril pochta", "moshina prapan", "mashina propan",
     "kandisoner", "kondisoner", "kanditsoner", "kanditsioner",
     "kredit", "nasiya", "lizing", "avtokredit", "haydovchiman", "taksisiman",
-    "narxi kelishilgan", "arzon narxda olib ketaman", "arzon obketaman"
+    "narxi kelishilgan", "arzon narxda olib ketaman", "arzon obketaman",
+    "misol uchun", "misol uchun:", "namuna", "namuna:",
+    "buyurtma haqida to'liqroq", "buyurtma haqida toliqroq",
+    "to'liqroq ma'lumot bering", "toliqroq malumot bering",
+    "bot orqali buyurtma", "bot orqali buyurtma bering",
+    "haydovchi bo'lsangiz ro'yxatdan", "haydovchi bolsangiz royxatdan",
+    "ro'yxatdan o'ting", "royxatdan oting"
 ])
 
 # Common car models pattern for regexes

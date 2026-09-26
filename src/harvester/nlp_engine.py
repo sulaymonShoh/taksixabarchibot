@@ -98,11 +98,16 @@ class OrderParser:
 
         return None
 
+    DUMMY_PHONE_REGEX = re.compile(r"(?:1234567|0000000|1111111|2222222|3333333|4444444|5555555|6666666|7777777|8888888|9999999|7654321)$")
+
     def extract_phone(self, text: str) -> Optional[str]:
-        """Extracts and formats Uzbek phone numbers to +998XXXXXXXXX."""
+        """Extracts and formats Uzbek phone numbers to +998XXXXXXXXX, rejecting dummy/example numbers."""
         match = PHONE_REGEX.search(text)
         if match:
             operator_code, p1, p2, p3 = match.groups()
+            tail = f"{p1}{p2}{p3}"
+            if self.DUMMY_PHONE_REGEX.search(tail):
+                return None
             return f"+998{operator_code}{p1}{p2}{p3}"
         return None
 

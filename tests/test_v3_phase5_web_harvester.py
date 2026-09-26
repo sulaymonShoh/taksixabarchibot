@@ -99,11 +99,14 @@ def run_phase5_web_tests():
 
     res_auth = client.get("/harvester", headers=auth_headers)
     assert res_auth.status_code == 200
-    assert "Harvester Radar & Buyurtmalar Oqimi" in res_auth.text
+    assert "Harvester Radar" in res_auth.text
     assert "Vodiy Toshkent Pitak Taksi" in res_auth.text
-    assert "+998884784784" in res_auth.text
     assert "v3.0" in res_auth.text
-    print("   [PASS] Authorized access rendered complete Harvester HTML dashboard.")
+
+    res_orders = client.get("/harvester/orders", headers=auth_headers)
+    assert res_orders.status_code == 200
+    assert "+998884784784" in res_orders.text
+    print("   [PASS] Authorized access rendered complete Harvester HTML dashboard & orders subpage.")
 
     # ==================== 2. HARVESTER STATS API ====================
     print("\n>>> 2. Testing Harvester Real-Time Stats API (/api/harvester/stats)...")

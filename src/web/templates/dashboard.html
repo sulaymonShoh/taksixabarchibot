@@ -151,6 +151,188 @@
             </div>
         </div>
     </div>
+
+    <!-- Section: Latest 5 Harvested Orders -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 backdrop-blur-sm shadow-sm dark:shadow-xl flex flex-col">
+        <div class="flex items-center justify-between mb-5">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                    <i class="fa-solid fa-bolt text-sm"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-lg text-slate-900 dark:text-white">Oxirgi Buyurtmalar (Harvester Radar)</h3>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Telegram guruhlaridan tutib olingan so'nggi 5 ta buyurtma</p>
+                </div>
+            </div>
+            <a href="/harvester/orders" class="text-xs text-amber-600 dark:text-amber-400 hover:underline font-semibold flex items-center space-x-1">
+                <span>Barcha buyurtmalar oqimi</span>
+                <i class="fa-solid fa-arrow-right text-[10px]"></i>
+            </a>
+        </div>
+
+        <div class="overflow-x-auto custom-scrollbar">
+            <table class="w-full text-left text-sm">
+                <thead>
+                    <tr class="text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800/80 text-xs uppercase">
+                        <th class="pb-3 font-semibold">Turi</th>
+                        <th class="pb-3 font-semibold">Yo'nalish</th>
+                        <th class="pb-3 font-semibold">Tafsilot</th>
+                        <th class="pb-3 font-semibold">Telefon</th>
+                        <th class="pb-3 font-semibold">Guruh</th>
+                        <th class="pb-3 font-semibold">Vaqt</th>
+                        <th class="pb-3 font-semibold text-center">Holat</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800/50">
+                    {% for o in latest_orders %}
+                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition">
+                        <td class="py-3">
+                            {% if o.order_type == 'CARGO' %}
+                            <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                📦 Pochta
+                            </span>
+                            {% else %}
+                            <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30">
+                                👤 Yo'lovchi
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 font-semibold text-slate-900 dark:text-white">
+                            {{ o.origin.name or o.origin.id }} → {{ o.destination.name or o.destination.id }}
+                        </td>
+                        <td class="py-3 text-xs text-slate-600 dark:text-slate-300">
+                            {% if o.order_type == 'PASSENGER' %}
+                            {{ o.passenger_count or 1 }} kishi
+                            {% else %}
+                            Yuk / Pochta
+                            {% endif %}
+                        </td>
+                        <td class="py-3 text-xs font-mono text-slate-700 dark:text-slate-300">
+                            {{ o.phone_number or '—' }}
+                        </td>
+                        <td class="py-3 text-xs text-slate-500 truncate max-w-[150px]" title="{{ o.group_title or o.source_group_id }}">
+                            {{ o.group_title or o.source_group_id }}
+                        </td>
+                        <td class="py-3 text-xs text-slate-500">
+                            {{ o.created_at[:16] if o.created_at else '—' }}
+                        </td>
+                        <td class="py-3 text-center">
+                            {% if o.status == 'CLAIMED' %}
+                            <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30">
+                                ✅ Band
+                            </span>
+                            {% elif o.status == 'TAKEN_ELSEWHERE' %}
+                            <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-500/15 text-slate-500 border border-slate-500/30">
+                                ⚪️ Olingan
+                            </span>
+                            {% else %}
+                            <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                🟢 Ochiq
+                            </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-slate-400 text-sm">
+                            Hozircha yangi buyurtmalar mavjud emas
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Section: Active Promos & Discount Campaigns -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- Campaign Card -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 backdrop-blur-sm shadow-sm dark:shadow-xl flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center">
+                            <i class="fa-solid fa-fire text-sm"></i>
+                        </div>
+                        <h3 class="font-bold text-base text-slate-900 dark:text-white">Umumiy Chegirma Aksiyasi</h3>
+                    </div>
+                    <a href="/discounts" class="text-xs text-amber-600 dark:text-amber-400 hover:underline font-medium">Boshqarish →</a>
+                </div>
+
+                {% if campaign %}
+                <div class="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-rose-500/10 border border-amber-500/20 mb-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-bold text-slate-900 dark:text-white text-base">{{ campaign.title }}</span>
+                        <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">FAOL</span>
+                    </div>
+                    <div class="text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                        <div>Qolgan vaqt: <span class="font-semibold text-amber-600 dark:text-amber-400">{{ campaign.remaining_days }} kun, {{ campaign.remaining_hours }} soat</span></div>
+                        <div class="flex items-center space-x-2 pt-1 font-mono text-[11px]">
+                            <span>1m: -{{ campaign.plan_discounts.get('1', 0) }}%</span>
+                            <span>•</span>
+                            <span>3m: -{{ campaign.plan_discounts.get('3', 0) }}%</span>
+                            <span>•</span>
+                            <span>6m: -{{ campaign.plan_discounts.get('6', 0) }}%</span>
+                            <span>•</span>
+                            <span>12m: -{{ campaign.plan_discounts.get('12', 0) }}%</span>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="p-6 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs">
+                    <i class="fa-solid fa-tag text-2xl text-slate-300 dark:text-slate-600 mb-2 block"></i>
+                    Hozirda umumiy chegirma aksiyasi yoqilmagan.
+                </div>
+                {% endif %}
+            </div>
+            <a href="/discounts" class="w-full mt-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs rounded-xl transition text-center block">
+                Yangi aksiya boshlash
+            </a>
+        </div>
+
+        <!-- Promocodes Card -->
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 backdrop-blur-sm shadow-sm dark:shadow-xl flex flex-col justify-between">
+            <div>
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-lg bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+                            <i class="fa-solid fa-ticket text-sm"></i>
+                        </div>
+                        <h3 class="font-bold text-base text-slate-900 dark:text-white">Faol Promokodlar</h3>
+                    </div>
+                    <a href="/discounts" class="text-xs text-amber-600 dark:text-amber-400 hover:underline font-medium">Barchasi ({{ active_promos|length }}) →</a>
+                </div>
+
+                {% if active_promos %}
+                <div class="space-y-2.5 max-h-48 overflow-y-auto custom-scrollbar">
+                    {% for p in active_promos[:4] %}
+                    <div class="p-3 bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between">
+                        <div>
+                            <div class="font-mono font-bold text-sm text-slate-900 dark:text-white">{{ p.code }}</div>
+                            <div class="text-[11px] text-slate-500">
+                                {% if p.discount_type == 'DAYS' %}+{{ p.discount_value }} kun VIP{% elif p.discount_type == 'PERCENT' %}-{{ p.discount_value }}% chegirma{% else %}-{{ p.discount_value }} so'm{% endif %}
+                                • {{ p.used_count }}/{{ p.max_uses }} ishlatildi
+                            </div>
+                        </div>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                            {{ p.status_badge }}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="p-6 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs">
+                    <i class="fa-solid fa-ticket text-2xl text-slate-300 dark:text-slate-600 mb-2 block"></i>
+                    Faol promokodlar mavjud emas.
+                </div>
+                {% endif %}
+            </div>
+            <a href="/discounts" class="w-full mt-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs rounded-xl transition text-center block">
+                Yangi promokod yaratish
+            </a>
+        </div>
+    </div>
 </div>
 {% endblock %}
+
 

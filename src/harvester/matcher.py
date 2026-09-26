@@ -230,14 +230,14 @@ class CorridorMatcher:
         """
         order_type = order.get("order_type", "PASSENGER")
         if script == "cyr":
-            header = "Почта" if order_type == "CARGO" else "Йўловчи"
+            header = "📦 Почта" if order_type == "CARGO" else "👤 Йўловчи"
             lichka_label = "Личка"
             tel_label = "Тел"
             asl_link_text = "Асл хабарни"
             korish_word = "кўриш"
             yozish_word = "Ёзиш"
         else:
-            header = "Pochta" if order_type == "CARGO" else "Yo'lovchi"
+            header = "📦 Pochta" if order_type == "CARGO" else "👤 Yo'lovchi"
             lichka_label = "Lichka"
             tel_label = "Tel"
             asl_link_text = "Asl xabarni"

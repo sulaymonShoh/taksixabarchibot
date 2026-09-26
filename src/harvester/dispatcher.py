@@ -128,10 +128,10 @@ class OrderDispatcher:
         """Formats clean paywall teaser for expired/free drivers without contacts or marketing bluff."""
         order_type = order.get("order_type", "PASSENGER")
         if script == "cyr":
-            header = "Почта" if order_type == "CARGO" else "Йўловчи"
+            header = "📦 Почта" if order_type == "CARGO" else "👤 Йўловчи"
             teaser_note = "🔒 <i>Мижоз хабари ва контактларини кўриш учун VIP обунани фаоллаштиринг.</i>"
         else:
-            header = "Pochta" if order_type == "CARGO" else "Yo'lovchi"
+            header = "📦 Pochta" if order_type == "CARGO" else "👤 Yo'lovchi"
             teaser_note = "🔒 <i>Mijoz xabari va kontaktlarini ko'rish uchun VIP obunani faollashtiring.</i>"
 
         origin = order.get("origin") or {}
@@ -303,14 +303,20 @@ class OrderDispatcher:
         2. Optionally finds matching drivers along highway corridors and sends DM alerts in parallel.
         """
         pool_msg_id = await self.dispatch_to_order_pool(order)
+        order_pool_active = bool(pool_msg_id)
 
         if active_drivers is None:
             active_drivers = await db.get_active_radar_drivers()
 
+        # If order pool group is active, VIP drivers receive the stream directly in the group.
+        # To prevent double notification spam, only send teaser notifications to non-VIP drivers via DM.
+        if order_pool_active:
+            active_drivers = [d for d in active_drivers if not d.get("is_vip")]
+
         if not active_drivers:
             return {
                 "order_id": order.get("id"),
-                "order_pool_sent": bool(pool_msg_id),
+                "order_pool_sent": order_pool_active,
                 "vip_sent": 0,
                 "teaser_sent": 0,
                 "matched_count": 0

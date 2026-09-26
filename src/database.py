@@ -155,6 +155,31 @@ async def init_db():
             )
         ''')
 
+        # Base pricing plans
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS pricing_plans (
+                months INTEGER PRIMARY KEY,
+                price INTEGER NOT NULL,
+                days INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                tag TEXT DEFAULT ''
+            )
+        ''')
+
+        # Seed default pricing plans if table is empty
+        async with db.execute('SELECT COUNT(*) FROM pricing_plans') as cursor:
+            count = (await cursor.fetchone())[0]
+            if count == 0:
+                await db.executemany('''
+                    INSERT INTO pricing_plans (months, price, days, title, tag)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', [
+                    (1, 25000, 30, '1 Oy', ''),
+                    (3, 65000, 90, '3 Oy', 'Tejamkor'),
+                    (6, 120000, 180, '6 Oy', 'Optima'),
+                    (12, 225000, 390, '12 Oy + 1 Oy Bepul 🔥', '+1 oy bepul')
+                ])
+
         # Harvester supergroups monitored by the system
         await db.execute('''
             CREATE TABLE IF NOT EXISTS harvester_groups (
@@ -1622,6 +1647,57 @@ async def get_active_radar_drivers() -> List[Dict[str, Any]]:
                 d["is_vip"] = is_vip
                 drivers.append(d)
             return drivers
+
+
+async def get_pricing_plans() -> Dict[int, Dict[str, Any]]:
+    """Retrieves all base pricing plans from DB, falling back to defaults if needed."""
+    plans = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute('SELECT * FROM pricing_plans ORDER BY months ASC') as cursor:
+            rows = await cursor.fetchall()
+            for r in rows:
+                plans[r['months']] = dict(r)
+    if not plans:
+        plans = {
+            1: {"months": 1, "price": 25000, "days": 30, "title": "1 Oy", "tag": ""},
+            3: {"months": 3, "price": 65000, "days": 90, "title": "3 Oy", "tag": "Tejamkor"},
+            6: {"months": 6, "price": 120000, "days": 180, "title": "6 Oy", "tag": "Optima"},
+            12: {"months": 12, "price": 225000, "days": 390, "title": "12 Oy + 1 Oy Bepul 🔥", "tag": "+1 oy bepul"}
+        }
+    return plans
+
+
+async def update_pricing_plan(
+    months: int,
+    price: Optional[int] = None,
+    days: Optional[int] = None,
+    title: Optional[str] = None,
+    tag: Optional[str] = None
+) -> bool:
+    """Updates parameters for a base plan."""
+    fields = []
+    params = []
+    if price is not None:
+        fields.append("price = ?")
+        params.append(price)
+    if days is not None:
+        fields.append("days = ?")
+        params.append(days)
+    if title is not None:
+        fields.append("title = ?")
+        params.append(title)
+    if tag is not None:
+        fields.append("tag = ?")
+        params.append(tag)
+    if not fields:
+        return False
+    params.append(months)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"UPDATE pricing_plans SET {', '.join(fields)} WHERE months = ?", params)
+        await db.commit()
+    return True
+
 
 
 

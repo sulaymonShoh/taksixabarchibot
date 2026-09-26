@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Tarif Rejalari — Taksi Xabarchi{% endblock %}
+{% block content %}
+<div class="p-6 md:p-8 max-w-8xl mx-auto w-full space-y-8">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <div class="flex items-center space-x-2.5">
+                <h2 class="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Tarif Rejalari Boshqaruvi</h2>
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">SaaS</span>
+            </div>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Platformadagi barcha haydovchilar uchun VIP obuna tariflari narxi, muddatlari va yorliqlarini dinamik boshqarish</p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <a href="/discounts" class="inline-flex items-center px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-white font-semibold text-sm rounded-xl border border-slate-200 dark:border-slate-700 transition shadow-xs">
+                <i class="fa-solid fa-tags mr-2"></i> Chegirma & Promolar
+            </a>
+            <button onclick="window.location.reload()" class="p-2.5 rounded-xl bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition shadow-xs cursor-pointer" title="Yangilash">
+                <i class="fa-solid fa-arrows-rotate text-sm"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Alert / Toast Container -->
+    <div id="toastNotification" class="hidden p-4 rounded-xl text-sm font-medium transition-all duration-300 shadow-md"></div>
+
+    <!-- Pricing Plans Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        {% for months in [1, 3, 6, 12] %}
+        {% set plan = plans.get(months, {'months': months, 'price': 25000, 'days': months * 30, 'title': months ~ ' Oy', 'tag': ''}) %}
+        <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 shadow-sm dark:shadow-xl flex flex-col justify-between relative overflow-hidden">
+            <!-- Header Icon & Badge -->
+            <div>
+                <div class="flex items-center justify-between mb-4">
+                    <div class="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold text-lg">
+                        {{ months }}m
+                    </div>
+                    {% if plan.tag %}
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                        {{ plan.tag }}
+                    </span>
+                    {% endif %}
+                </div>
+
+                <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-1">{{ plan.title }}</h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mb-6">Amal qilish muddati: <span class="font-semibold text-slate-700 dark:text-slate-300">{{ plan.days }} kun</span></p>
+
+                <!-- Form Inputs -->
+                <form id="planForm_{{ months }}" onsubmit="savePlan(event, {{ months }})" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">Tarif Nomi</label>
+                        <input type="text" id="title_{{ months }}" value="{{ plan.title }}" required class="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 transition" />
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">Narx (so'mda)</label>
+                        <div class="relative">
+                            <input type="number" id="price_{{ months }}" value="{{ plan.price }}" min="1000" step="500" required class="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 transition pr-14" />
+                            <span class="absolute right-3.5 top-2.5 text-xs text-slate-400 pointer-events-none font-semibold">UZS</span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">Amal Qilish (kun)</label>
+                        <input type="number" id="days_{{ months }}" value="{{ plan.days }}" min="1" required class="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 transition" />
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">Yorliq (Tag / Badge)</label>
+                        <input type="text" id="tag_{{ months }}" value="{{ plan.tag or '' }}" placeholder="Masalan: Tejamkor, Optima" class="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 transition" />
+                    </div>
+
+                    <button type="submit" id="btn_{{ months }}" class="w-full mt-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm rounded-xl transition shadow-md shadow-amber-500/20 flex items-center justify-center space-x-2 cursor-pointer">
+                        <i class="fa-solid fa-floppy-disk"></i>
+                        <span>Saqlash</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Explanatory SaaS Card -->
+    <div class="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 shadow-sm dark:shadow-xl">
+        <div class="flex items-start space-x-4">
+            <div class="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center justify-center shrink-0">
+                <i class="fa-solid fa-circle-info text-lg"></i>
+            </div>
+            <div>
+                <h4 class="text-base font-bold text-slate-900 dark:text-white">Tariflar Qanday Ishlaydi?</h4>
+                <p class="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                    Ushbu sahifada o'rnatilgan narxlar Telegram bot va veb-saytda asosiy narx sifatida ishlatiladi.
+                    Agar siz <b>Chegirmalar & Promolar</b> bo'limida aksiya yoki promokod e'lon qilsangiz, chegirmalar aynan shu bazaviy narxlardan avtomatik hisoblab chiqariladi.
+                    O'zgarishlar Telegram botda bir zumda kuchga kiradi.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function savePlan(e, months) {
+    e.preventDefault();
+    const btn = document.getElementById(`btn_${months}`);
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> <span>Saqlanmoqda...</span>`;
+
+    const title = document.getElementById(`title_${months}`).value.trim();
+    const price = parseInt(document.getElementById(`price_${months}`).value, 10);
+    const days = parseInt(document.getElementById(`days_${months}`).value, 10);
+    const tag = document.getElementById(`tag_${months}`).value.trim();
+
+    try {
+        const res = await fetch('/api/admin/plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ months, price, days, title, tag })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`✅ ${months} oylik tarif muvaffaqiyatli yangilandi!`, 'success');
+        } else {
+            showToast(`❌ Xatolik: ${data.error || 'Saqlab bo\'lmadi'}`, 'error');
+        }
+    } catch (err) {
+        showToast(`❌ Tarmoq xatosi: ${err.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+function showToast(message, type) {
+    const toast = document.getElementById('toastNotification');
+    toast.textContent = message;
+    toast.className = `p-4 rounded-xl text-sm font-semibold transition-all duration-300 shadow-md ${
+        type === 'success' 
+            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30' 
+            : 'bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-500/30'
+    }`;
+    toast.classList.remove('hidden');
+    setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 4000);
+}
+</script>
+{% endblock %}

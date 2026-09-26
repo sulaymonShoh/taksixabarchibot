@@ -64,8 +64,9 @@ def run_phase6_tests():
         assert any("Harvester Radar" in b for b in flat_buttons)
         assert any("Foydalanuvchilar" in b for b in flat_buttons)
         assert any("Moliya" in b and "3 ta kutilmoqda" in b for b in flat_buttons)
-        assert any("Haydovchi rejimini ko'rish" in b for b in flat_buttons)
-        print("   [PASS] admin_main_dashboard_kb rendered all 6 admin control modules.")
+        assert any("Asosiy tariflar" in b for b in flat_buttons)
+        assert any("Chegirma & Promolar" in b for b in flat_buttons)
+        print("   [PASS] admin_main_dashboard_kb rendered all admin control modules.")
 
         # Harvester Hub KB
         hub_kb = kb.admin_harvester_hub_kb(userbot_online=True)

@@ -217,7 +217,7 @@ async def run_context_tagging_tests():
     order_b = await listener.process_raw_message(
         chat_id=gid_general,
         chat_title="Andijon Toshkent Taksi",
-        text="Toshkentga 1 kishi kerak shoshilinch tel 931234567",
+        text="Toshkentga 1 kishi kerak shoshilinch tel 939876543",
         sender_username="@anjan_user"
     )
     assert order_b is not None
@@ -239,7 +239,7 @@ async def run_context_tagging_tests():
     order_c = await listener.process_raw_message(
         chat_id=gid_samarqand,
         chat_title="Samarqand Express",
-        text="Toshkentga ketadiganlar bormi 1 kishi tel 971234567",
+        text="Toshkentga ketadiganlar bormi 1 kishi tel 978765432",
         sender_username="@samarkand_user"
     )
     assert order_c is not None
@@ -257,7 +257,7 @@ async def run_context_tagging_tests():
     order_d = await listener.process_raw_message(
         chat_id=gid_asaka,
         chat_title="Asaka Pitak",
-        text="Toshkentdan qaytishga 2 kishi bor tel 911234567",
+        text="Toshkentdan qaytishga 2 kishi bor tel 917654321",
         sender_username="@toshkentdan_asaka"
     )
     assert order_d is not None

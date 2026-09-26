@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Body
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -21,6 +22,9 @@ app = FastAPI(title="Taksi Xabarchi Admin Panel", docs_url=None, redoc_url=None)
 security = HTTPBasic()
 templates = Jinja2Templates(directory="src/web/templates")
 
+os.makedirs("src/web/static/fonts", exist_ok=True)
+app.mount("/static", StaticFiles(directory="src/web/static"), name="static")
+
 def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
     is_user_ok = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
     is_pass_ok = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
@@ -33,6 +37,13 @@ def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials.username
 
 # ==================== DATA MODELS ====================
+class UpdatePlanRequest(BaseModel):
+    months: int
+    price: int
+    days: int
+    title: str
+    tag: Optional[str] = ""
+
 class ExtendSubRequest(BaseModel):
     days: int
 
@@ -98,6 +109,11 @@ def enrich_user_data(u: Dict[str, Any]) -> Dict[str, Any]:
 async def dashboard_view(request: Request, username: str = Depends(verify_credentials)):
     users = await db.get_all_users()
     pending = await db.get_pending_payment_requests()
+    latest_orders = await db.get_recent_harvested_orders(limit=5)
+    campaign = await db.get_active_campaign_discount()
+    promos = await db.get_promocodes()
+    active_promos = [p for p in promos if p.get("status_badge") == "🟢 FAOL"]
+    pricing_plans = await db.get_pricing_plans()
     
     active_subs = 0
     now = datetime.utcnow()
@@ -131,7 +147,11 @@ async def dashboard_view(request: Request, username: str = Depends(verify_creden
         "earnings": earnings,
         "recent_users": enriched_users,
         "recent_payments": pending[:5],
-        "pending_count": len(pending)
+        "pending_count": len(pending),
+        "latest_orders": latest_orders,
+        "campaign": campaign,
+        "active_promos": active_promos,
+        "pricing_plans": pricing_plans
     })
 
 @app.get("/users", response_class=HTMLResponse)
@@ -273,10 +293,32 @@ async def api_delete_promocode(promo_id: int, username: str = Depends(verify_cre
     await db.delete_promocode(promo_id)
     return JSONResponse({"success": True})
 
-@app.get("/miniapp", response_class=HTMLResponse)
-async def miniapp_view(request: Request):
-    """Public Mini App endpoint accessible inside Telegram Web App."""
-    return templates.TemplateResponse(request=request, name="miniapp.html", context={})
+# ==================== PRICING PLANS MANAGEMENT ====================
+@app.get("/plans", response_class=HTMLResponse)
+async def plans_view(request: Request, username: str = Depends(verify_credentials)):
+    plans = await db.get_pricing_plans()
+    pending = await db.get_pending_payment_requests()
+    return templates.TemplateResponse(request=request, name="plans.html", context={
+        "active_page": "plans",
+        "plans": plans,
+        "pending_count": len(pending)
+    })
+
+@app.get("/api/admin/plans")
+async def api_get_plans(username: str = Depends(verify_credentials)):
+    plans = await db.get_pricing_plans()
+    return JSONResponse(plans)
+
+@app.post("/api/admin/plans")
+async def api_update_plan(req: UpdatePlanRequest, username: str = Depends(verify_credentials)):
+    success = await db.update_pricing_plan(
+        months=req.months,
+        price=req.price,
+        days=req.days,
+        title=req.title,
+        tag=req.tag
+    )
+    return JSONResponse({"success": success})
 
 # ==================== ADMIN ACTION APIS ====================
 @app.post("/api/users/{user_id}/extend")
@@ -367,20 +409,54 @@ async def view_harvester(request: Request, username: str = Depends(verify_creden
     from src.harvester.service import default_harvester_service
     stats = await db.get_harvester_stats()
     groups = await db.get_harvester_groups()
-    orders = await db.get_recent_harvested_orders(limit=50)
     pending = await db.get_pending_payment_requests()
     hb_status = default_harvester_service.get_status()
     analytics = await db.get_group_quality_analytics()
     order_pool_id = await db.get_order_pool_chat_id()
     return templates.TemplateResponse(request=request, name="harvester.html", context={
         "active_page": "harvester",
+        "sub_page": "groups",
         "stats": stats,
         "groups": groups,
-        "orders": orders,
         "pending_count": len(pending),
         "userbot": hb_status,
         "analytics": analytics,
         "order_pool_chat_id": order_pool_id
+    })
+
+@app.get("/harvester/analytics", response_class=HTMLResponse)
+async def view_harvester_analytics(request: Request, username: str = Depends(verify_credentials)):
+    from src.harvester.service import default_harvester_service
+    stats = await db.get_harvester_stats()
+    groups = await db.get_harvester_groups()
+    pending = await db.get_pending_payment_requests()
+    hb_status = default_harvester_service.get_status()
+    analytics = await db.get_group_quality_analytics()
+    return templates.TemplateResponse(request=request, name="harvester_analytics.html", context={
+        "active_page": "harvester",
+        "sub_page": "analytics",
+        "stats": stats,
+        "groups": groups,
+        "pending_count": len(pending),
+        "userbot": hb_status,
+        "analytics": analytics
+    })
+
+@app.get("/harvester/orders", response_class=HTMLResponse)
+async def view_harvester_orders(request: Request, limit: int = 50, region: Optional[str] = None, username: str = Depends(verify_credentials)):
+    from src.harvester.service import default_harvester_service
+    stats = await db.get_harvester_stats()
+    orders = await db.get_recent_harvested_orders(limit=limit, region=region)
+    pending = await db.get_pending_payment_requests()
+    hb_status = default_harvester_service.get_status()
+    return templates.TemplateResponse(request=request, name="harvester_orders.html", context={
+        "active_page": "harvester",
+        "sub_page": "orders",
+        "stats": stats,
+        "orders": orders,
+        "pending_count": len(pending),
+        "userbot": hb_status,
+        "selected_region": region or "ALL"
     })
 
 @app.get("/api/harvester/analytics")

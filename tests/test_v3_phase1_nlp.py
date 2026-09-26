@@ -30,13 +30,13 @@ def run_phase1_tests():
     # ==================== 1. PASSENGER ORDER EXTRACTION ====================
     print("\n>>> 1. Testing Real-World Passenger Order Extraction (Toshkent ⇄ Andijon)...")
     
-    msg1 = "Toshkentdan Asakaga 2 kishi bor, tel: 90 123 45 67"
+    msg1 = "Toshkentdan Asakaga 2 kishi bor, tel: 90 987 65 43"
     res1 = parser.parse(msg1)
     assert res1 is not None, "Failed to parse msg1"
     assert res1["order_type"] == "PASSENGER"
     assert res1["passenger_count"] == 2
     assert res1["destination"]["id"] == "asaka"
-    assert res1["phone_number"] == "+998901234567"
+    assert res1["phone_number"] == "+998909876543"
     print("   [PASS] 'Toshkentdan Asakaga 2 kishi bor' -> Correctly extracted.")
 
     msg2 = "Qo'yliqdan Shahrixonga bitta odam bor hozir ketishga +998912345678"

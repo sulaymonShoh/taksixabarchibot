@@ -383,14 +383,11 @@ def admin_main_dashboard_kb(userbot_online: bool = False, pending_cheques: int =
             InlineKeyboardButton(text=f"💰 Moliya & Cheklar{cheque_badge}", callback_data="admin_finance")
         ],
         [
-            InlineKeyboardButton(text="💳 Tariflarni boshqarish", callback_data="admin_plans"),
+            InlineKeyboardButton(text="💳 Asosiy tariflar", callback_data="admin_plans"),
             InlineKeyboardButton(text="🏷 Chegirma & Promolar", callback_data="admin_promos")
         ],
         [
             InlineKeyboardButton(text="📢 Xabarnoma yuborish", callback_data="admin_broadcast")
-        ],
-        [
-            InlineKeyboardButton(text="🚗 Haydovchi rejimini ko'rish (Sinov)", callback_data="admin_driver_view")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -432,8 +429,34 @@ def admin_order_pool_kb(is_set: bool = False) -> InlineKeyboardMarkup:
     ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def admin_plans_kb(has_active_discount: bool = False) -> InlineKeyboardMarkup:
-    """Keyboard for managing pricing plans and payment info."""
+def admin_plans_editor_kb(plans: Optional[Dict[int, Dict[str, Any]]] = None) -> InlineKeyboardMarkup:
+    """Dedicated keyboard for editing base subscription pricing plans."""
+    keyboard = []
+    if plans:
+        for months in sorted(plans.keys()):
+            p = plans[months]
+            price = p.get("price", 0)
+            tag = f" ({p['tag']})" if p.get("tag") else ""
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"✏️ {p.get('title', f'{months} Oy')} — {price:,} so'm{tag}",
+                    callback_data=f"admin_edit_plan_{months}"
+                )
+            ])
+    else:
+        keyboard.extend([
+            [InlineKeyboardButton(text="✏️ 1 Oy (25,000 so'm)", callback_data="admin_edit_plan_1")],
+            [InlineKeyboardButton(text="✏️ 3 Oy (65,000 so'm)", callback_data="admin_edit_plan_3")],
+            [InlineKeyboardButton(text="✏️ 6 Oy (120,000 so'm)", callback_data="admin_edit_plan_6")],
+            [InlineKeyboardButton(text="✏️ 12 Oy (225,000 so'm)", callback_data="admin_edit_plan_12")]
+        ])
+    keyboard.append([
+        InlineKeyboardButton(text="👑 Asosiy panelga qaytish", callback_data="admin_panel")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def admin_promos_kb(has_active_discount: bool = False) -> InlineKeyboardMarkup:
+    """Keyboard for managing campaign discounts and promocodes."""
     buttons = [
         [
             InlineKeyboardButton(text="🏷 Chegirma aksiyasi (/setdiscount)", callback_data="admin_set_discount_info"),
@@ -448,6 +471,12 @@ def admin_plans_kb(has_active_discount: bool = False) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="👑 Asosiy panelga qaytish", callback_data="admin_panel")
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def admin_plans_kb(has_active_discount: bool = False, plans: Optional[Dict[int, Dict[str, Any]]] = None) -> InlineKeyboardMarkup:
+    """Maintains backward compatibility for tests and existing callers."""
+    if plans:
+        return admin_plans_editor_kb(plans)
+    return admin_promos_kb(has_active_discount=has_active_discount)
 
 def admin_broadcast_kb(userbot_online: bool = False) -> InlineKeyboardMarkup:
     """Keyboard for broadcasting options."""
