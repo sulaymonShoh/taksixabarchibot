@@ -42,6 +42,7 @@ class HarvesterService:
         self._last_heartbeat: Optional[datetime] = None
         self._last_error: Optional[str] = None
         self._alert_sent: bool = False
+        self._watchdog_ticks: int = 0
         self.bot: Any = None  # aiogram Bot instance for admin alerting
 
     def is_session_available(self) -> bool:
@@ -210,6 +211,16 @@ class HarvesterService:
                     if self._alert_sent:
                         await self._notify_admin_recovery()
                         self._alert_sent = False
+
+                    # Periodic supergroup viewport touch (every ~60s): keeps Telegram DC update pipes active
+                    self._watchdog_ticks += 1
+                    if self._watchdog_ticks % 3 == 0:
+                        try:
+                            dialogs_call = self.client.get_dialogs(limit=15)
+                            if inspect.isawaitable(dialogs_call):
+                                await asyncio.wait_for(dialogs_call, timeout=6.0)
+                        except Exception as e:
+                            logger.debug(f"Harvester dialog keepalive touch exception: {e}")
                 else:
                     self._consecutive_failures += 1
                     logger.warning(

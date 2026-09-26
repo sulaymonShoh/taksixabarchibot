@@ -2462,6 +2462,20 @@ async def radar_districts_clear_call(call: CallbackQuery):
 
 # ==================== V3 ORDER CLAIM & STATUS SYNC HANDLERS ====================
 
+def format_route_endpoint(val: Optional[str]) -> str:
+    """Formats raw internal region/district/pitak identifiers into human-readable names."""
+    if not val:
+        return "Noma'lum"
+    v = str(val).strip().lower().replace("_all", "")
+    from src.harvester.geo_data import PITAKS, DISTRICTS, REGIONS
+    if v in PITAKS:
+        return PITAKS[v].get("name", v)
+    if v in DISTRICTS:
+        return DISTRICTS[v].get("name", v)
+    if v in REGIONS:
+        return REGIONS[v].get("name", v)
+    return str(val).replace("_", " ").title()
+
 @router.callback_query(F.data.startswith("claim_order_"))
 async def claim_order_call(call: CallbackQuery):
     user_id = call.from_user.id
@@ -2486,8 +2500,8 @@ async def claim_order_call(call: CallbackQuery):
         await safe_answer(call, "✅ Buyurtma qabul qilindi! Mijoz bilan zudlik bilan bog'laning.", show_alert=True)
         # Edit claiming driver's card or group card
         is_group = call.message.chat.type in ("group", "supergroup")
+        current_text = call.message.html_text or call.message.text or ""
         with contextlib.suppress(TelegramBadRequest):
-            current_text = call.message.html_text or call.message.text or ""
             claimer_name = call.from_user.full_name
             if is_group:
                 # Mask phone numbers and contact handles in the group card once claimed
@@ -2513,19 +2527,71 @@ async def claim_order_call(call: CallbackQuery):
 
         # Send private confirmation DM to the winning driver with complete client info
         order_dict = result.get("order") or {}
-        orig_name = order_dict.get("origin_district") or order_dict.get("origin_region") or ""
-        dest_name = order_dict.get("dest_district") or order_dict.get("dest_region") or ""
-        phone = order_dict.get("phone_number") or "Ko'rsatilmagan"
+        orig_raw = order_dict.get("origin_district") or order_dict.get("origin_region") or ""
+        dest_raw = order_dict.get("dest_district") or order_dict.get("dest_region") or ""
+        orig_name = format_route_endpoint(orig_raw)
+        dest_name = format_route_endpoint(dest_raw)
+
+        phone = order_dict.get("phone_number")
+        phone_display = phone if phone else "Ko'rsatilmagan"
         raw_text = order_dict.get("raw_text") or ""
+
+        telegram_username = order_dict.get("telegram_username")
+        sender_id = order_dict.get("sender_id")
+        message_link = order_dict.get("message_link")
+
+        # Fallback extraction from card text if not in DB
+        if not telegram_username and not sender_id:
+            m_user = re.search(r'tg://user\?id=(\d+)', current_text)
+            if m_user:
+                sender_id = int(m_user.group(1))
+            m_username = re.search(r't\.me/([a-zA-Z0-9_]{4,})', current_text)
+            if m_username and m_username.group(1).lower() not in ("c", "joinchat", "bot"):
+                telegram_username = f"@{m_username.group(1)}"
+        if not message_link:
+            m_msg = re.search(r'(https://t\.me/(?:c/\d+|\w+)/\d+)', current_text)
+            if m_msg:
+                message_link = m_msg.group(1)
+
+        # Profile link display
+        if telegram_username:
+            clean_u = telegram_username.replace("@", "")
+            profile_link = f"<a href=\"https://t.me/{clean_u}\">{telegram_username}</a>"
+            author_url = f"https://t.me/{clean_u}"
+        elif sender_id:
+            profile_link = f"<a href=\"tg://user?id={sender_id}\">Mijoz profiliga o'tish</a>"
+            author_url = f"tg://user?id={sender_id}"
+        elif message_link:
+            profile_link = f"<a href=\"{message_link}\">Guruhdagi xabar orqali bog'lanish</a>"
+            author_url = message_link
+        else:
+            profile_link = "<i>Ko'rsatilmagan</i>"
+            author_url = None
+
         dm_text = (
             "🎉 <b>SIZ BUYURTMANI BAND QILDINGIZ!</b>\n\n"
             f"📍 <b>Yo'nalish:</b> {orig_name} ➡️ {dest_name}\n"
-            f"📞 <b>Telefon:</b> <code>{phone}</code>\n"
+            f"📞 <b>Telefon:</b> <code>{phone_display}</code>\n"
+            f"💬 <b>Lichka / Profil:</b> {profile_link}\n"
             f"📝 <b>Mijoz xabari:</b>\n<i>{raw_text}</i>\n\n"
             "<i>Mijoz bilan zudlik bilan bog'laning. Oq yo'l!</i>"
         )
+
+        dm_buttons = []
+        action_row = []
+        if author_url:
+            action_row.append(InlineKeyboardButton(text="💬 Lichkaga yozish", url=author_url))
+        if phone and phone != "Ko'rsatilmagan":
+            clean_tel = re.sub(r"[^\d+]", "", phone)
+            action_row.append(InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{clean_tel}"))
+        if action_row:
+            dm_buttons.append(action_row)
+        if message_link:
+            dm_buttons.append([InlineKeyboardButton(text="🔗 Asl xabarni ko'rish", url=message_link)])
+
+        dm_kb = InlineKeyboardMarkup(inline_keyboard=dm_buttons) if dm_buttons else None
         with contextlib.suppress(Exception):
-            await call.bot.send_message(chat_id=user_id, text=dm_text, parse_mode="HTML")
+            await call.bot.send_message(chat_id=user_id, text=dm_text, reply_markup=dm_kb, parse_mode="HTML")
 
         # Synchronize all other driver messages in the background
         if oid > 0:

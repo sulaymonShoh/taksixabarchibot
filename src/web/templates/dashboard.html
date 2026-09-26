@@ -198,7 +198,7 @@
                             {% endif %}
                         </td>
                         <td class="py-3 font-semibold text-slate-900 dark:text-white">
-                            {{ o.origin.name or o.origin.id }} → {{ o.destination.name or o.destination.id }}
+                            {{ o.origin_district or o.origin_region or '?' }} → {{ o.dest_district or o.dest_region or 'Toshkent' }}
                         </td>
                         <td class="py-3 text-xs text-slate-600 dark:text-slate-300">
                             {% if o.order_type == 'PASSENGER' %}
@@ -210,8 +210,8 @@
                         <td class="py-3 text-xs font-mono text-slate-700 dark:text-slate-300">
                             {{ o.phone_number or '—' }}
                         </td>
-                        <td class="py-3 text-xs text-slate-500 truncate max-w-[150px]" title="{{ o.group_title or o.source_group_id }}">
-                            {{ o.group_title or o.source_group_id }}
+                        <td class="py-3 text-xs text-slate-500 truncate max-w-[150px]" title="{{ o.source_group_title or o.source_group_id }}">
+                            {{ o.source_group_title or o.source_group_id }}
                         </td>
                         <td class="py-3 text-xs text-slate-500">
                             {{ o.created_at[:16] if o.created_at else '—' }}

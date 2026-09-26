@@ -310,6 +310,47 @@ async def run_tests():
     assert o4["status"] == "TAKEN_ELSEWHERE"
     print("   [PASS] REST API verified: status, claimed_by, and claimed_at present in orders payload.")
 
+    # ==================== 9. WINNING DRIVER PRIVATE DM WITH PROFILE LINK ====================
+    print("\n>>> 9. Testing Winning Driver Private DM with Author Profile Link (No Phone)...")
+    ord_id_6 = await db.save_harvested_order({
+        "raw_text": "toshkendan yuradigon moshina bormi?",
+        "order_type": "PASSENGER",
+        "origin": {"region_id": "toshkent_shahar", "district_id": "toshkent_shahar"},
+        "destination": {"region_id": "andijon", "district_id": "andijon_shahar"},
+        "telegram_username": "@test_passenger",
+        "sender_id": 987654321,
+        "message_id": 7788,
+        "message_link": "https://t.me/c/1234567/7788",
+        "message_hash": "hash_claim_test_6"
+    })
+    dm_vip_call = AsyncMock()
+    dm_vip_call.from_user.id = 201
+    dm_vip_call.from_user.full_name = "Ali Haydovchi"
+    dm_vip_call.data = f"claim_order_{ord_id_6}"
+    dm_vip_call.message = MockMessage(600, -1001234567, "Group Order Card Text")
+    dm_vip_call.message.chat.type = "supergroup"
+    dm_vip_call.bot = mock_bot
+
+    await claim_order_call(dm_vip_call)
+
+    # Check that driver 201 received private DM confirmation
+    dm_msgs = [m for (cid, mid), m in mock_bot.messages.items() if cid == 201 and "SIZ BUYURTMANI BAND QILDINGIZ" in m.text]
+    assert len(dm_msgs) >= 1
+    winner_dm = dm_msgs[-1]
+
+    # 1. Human-friendly route name (no raw _all or underscores)
+    assert "Toshkent shahri ➡️ Andijon shahar" in winner_dm.text
+    # 2. Phone says Ko'rsatilmagan
+    assert "Ko'rsatilmagan" in winner_dm.text
+    # 3. Profile / Lichka link is present and clickable
+    assert "Lichka / Profil:" in winner_dm.text
+    assert "https://t.me/test_passenger" in winner_dm.text
+    # 4. Buttons include Lichkaga yozish and Asl xabarni ko'rish
+    dm_btns = [b for row in winner_dm.reply_markup.inline_keyboard for b in row]
+    assert any("Lichkaga yozish" in b.text and "test_passenger" in b.url for b in dm_btns)
+    assert any("Asl xabarni ko'rish" in b.text for b in dm_btns)
+    print("   [PASS] Winning DM verified: Clean route, Ko'rsatilmagan phone, author profile link and action buttons!")
+
     print("\n" + "=" * 70)
     print("ALL REAL-TIME ORDER RESERVATION & SYNC TESTS PASSED (100% SUCCESS)!")
     print("=" * 70)

@@ -230,6 +230,9 @@ async def init_db():
                 phone_number TEXT,
                 telegram_username TEXT,
                 message_hash TEXT UNIQUE,
+                sender_id BIGINT DEFAULT NULL,
+                message_id BIGINT DEFAULT NULL,
+                message_link TEXT DEFAULT NULL,
                 status TEXT DEFAULT 'ACTIVE',
                 claimed_by BIGINT DEFAULT NULL,
                 claimed_at TIMESTAMP DEFAULT NULL,
@@ -246,6 +249,12 @@ async def init_db():
                 await db.execute("ALTER TABLE harvested_orders ADD COLUMN claimed_by BIGINT DEFAULT NULL")
             if 'claimed_at' not in ho_columns:
                 await db.execute("ALTER TABLE harvested_orders ADD COLUMN claimed_at TIMESTAMP DEFAULT NULL")
+            if 'sender_id' not in ho_columns:
+                await db.execute("ALTER TABLE harvested_orders ADD COLUMN sender_id BIGINT DEFAULT NULL")
+            if 'message_id' not in ho_columns:
+                await db.execute("ALTER TABLE harvested_orders ADD COLUMN message_id BIGINT DEFAULT NULL")
+            if 'message_link' not in ho_columns:
+                await db.execute("ALTER TABLE harvested_orders ADD COLUMN message_link TEXT DEFAULT NULL")
 
         # Harvested order dispatches (tracking sent messages for real-time claim sync)
         await db.execute('''
@@ -1249,8 +1258,9 @@ async def save_harvested_order(order_data: Dict[str, Any]) -> Optional[int]:
                 INSERT INTO harvested_orders (
                     source_group_id, source_group_title, raw_text, order_type,
                     origin_region, origin_district, dest_region, dest_district,
-                    passenger_count, phone_number, telegram_username, message_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    passenger_count, phone_number, telegram_username, message_hash,
+                    sender_id, message_id, message_link
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_group_id,
@@ -1264,7 +1274,10 @@ async def save_harvested_order(order_data: Dict[str, Any]) -> Optional[int]:
                     order_data.get("passenger_count", 1),
                     order_data.get("phone_number"),
                     order_data.get("telegram_username"),
-                    msg_hash
+                    msg_hash,
+                    order_data.get("sender_id"),
+                    order_data.get("message_id"),
+                    order_data.get("message_link")
                 )
             )
             order_id = cursor.lastrowid

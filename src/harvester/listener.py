@@ -76,17 +76,22 @@ class HarvesterListener:
 
             # 1. Deduplication check
             if self.dedup.is_duplicate(text):
+                clean_preview = text.replace('\n', ' ').strip()[:45]
+                logger.info(f"🔁 [DEDUP] Takroriy xabar e'tiborsiz qoldirildi ('{chat_title}'): \"{clean_preview}...\"")
                 return None
 
             # 2. In-memory NLP parsing (Rejects driver ads, extracts routes)
             order = self.parser.parse(text, author_username=sender_username)
             if not order:
+                clean_preview = text.replace('\n', ' ').strip()[:45]
+                logger.info(f"🚫 [NLP] Haydovchi e'loni/spam rad etildi ('{chat_title}'): \"{clean_preview}...\"")
                 return None
 
         phone = order.get("phone_number")
         
         # Second-pass phone-based deduplication
         if phone and self.dedup.is_duplicate(text, phone=phone):
+            logger.info(f"🔁 [DEDUP_PHONE] Raqam ({phone}) bo'yicha takroriy xabar e'tiborsiz qoldirildi ('{chat_title}')")
             return None
 
         # Record into deduplication cache
@@ -196,6 +201,10 @@ class HarvesterListener:
 
             # 2. Fast in-memory deduplication check (<0.05ms)
             if self.dedup.is_duplicate(raw_text):
+                group_info = self._monitored_groups_cache.get(chat_id, {})
+                title = group_info.get("title") or str(chat_id)
+                clean_preview = raw_text.replace('\n', ' ').strip()[:45]
+                logger.info(f"🔁 [DEDUP] Takroriy xabar e'tiborsiz qoldirildi ('{title}'): \"{clean_preview}...\"")
                 return
 
             # 3. Fast in-memory NLP parsing (<0.06ms)
@@ -204,6 +213,10 @@ class HarvesterListener:
             if not order:
                 # Driver ad / spam rejected!
                 self.record_activity(chat_id, spam=1)
+                group_info = self._monitored_groups_cache.get(chat_id, {})
+                title = group_info.get("title") or str(chat_id)
+                clean_preview = raw_text.replace('\n', ' ').strip()[:45]
+                logger.debug(f"🚫 [NLP] Haydovchi e'loni/spam rad etildi ('{title}'): \"{clean_preview}...\"")
                 return
 
             # Message is a verified passenger or cargo order!
