@@ -9,6 +9,7 @@ import inspect
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Callable, Awaitable, List
 from telethon import TelegramClient, events
+from telethon.errors import FloodWaitError
 
 from src import database as db
 from src.harvester.nlp_engine import OrderParser
@@ -45,6 +46,7 @@ class HarvesterListener:
         self._flush_interval: int = 10  # seconds between batched DB flushes
         self._pulse_task: Optional[asyncio.Task] = None
         self._stale_tracker: Dict[int, Dict[str, Any]] = {}
+        self._last_seen_msg_ids: Dict[int, int] = {}
 
     async def reload_monitored_groups(self):
         """Refreshes active group IDs and metadata cache from the database."""
@@ -181,9 +183,14 @@ class HarvesterListener:
         Guarantees zero-network ingestion and sub-millisecond filtering.
         """
         try:
-            raw_text = event.raw_text or ""
+            raw_text = getattr(event, "raw_text", None) or getattr(event, "message", "") or ""
             if len(raw_text.strip()) < 5:
                 return
+
+            message_id = getattr(event, "id", None)
+            if message_id:
+                if message_id > self._last_seen_msg_ids.get(chat_id, 0):
+                    self._last_seen_msg_ids[chat_id] = message_id
 
             # Record raw message seen in group telemetry buffer
             self.record_activity(chat_id, seen=1)
@@ -227,12 +234,12 @@ class HarvesterListener:
             # Message is a verified passenger or cargo order!
             # Resolve group metadata from in-memory cache with zero network calls
             group_info = self._monitored_groups_cache.get(chat_id, {})
-            chat_title = group_info.get("title") or getattr(event.chat, "title", str(chat_id))
-            chat_username = group_info.get("username") or getattr(event.chat, "username", None)
+            chat_obj = getattr(event, "chat", None)
+            chat_title = group_info.get("title") or getattr(chat_obj, "title", str(chat_id))
+            chat_username = group_info.get("username") or getattr(chat_obj, "username", None)
             if chat_username and chat_username.startswith("@"):
                 chat_username = chat_username[1:]
 
-            message_id = getattr(event, "id", None)
             message_link = None
             if message_id:
                 if chat_username:
@@ -323,16 +330,18 @@ class HarvesterListener:
             max_min = info["max_lag"] / 60.0
             logger.info(f"⏩ [STALE] {c} ta eskirgan xabar o'tkazib yuborildi ('{title}' | Lag: ~{max_min:.1f} daqiqa)")
 
-    async def _channel_pulse_loop(self):
+    async def _active_poller_loop(self):
         """
-        Periodically touches monitored supergroups (every 25s) to signal active viewport to Telegram DC.
-        Forces Telegram servers to flush channel sequence differences in near-real-time (<25s)
-        instead of buffering messages for 5-8 minutes.
+        Hybrid Active Poller:
+        Sweeps all monitored taxi supergroups on a 60-second cycle with 1.0s stagger.
+        Fetches live messages directly via Telegram MTProto RPC (messages.getHistory).
+        Guarantees orders are captured in < 60s even when Telegram DC delays socket push events.
         """
         while self._is_running:
             try:
-                await asyncio.sleep(25)
+                sweep_start = time.time()
                 if not self._is_running or not self.client or not self.client.is_connected():
+                    await asyncio.sleep(5)
                     continue
 
                 chat_ids = list(self._monitored_chat_ids)
@@ -340,17 +349,47 @@ class HarvesterListener:
                     if not self._is_running:
                         break
                     try:
-                        msgs_call = self.client.get_messages(cid, limit=1)
+                        last_id = self._last_seen_msg_ids.get(cid)
+                        if last_id:
+                            msgs_call = self.client.get_messages(cid, limit=20, min_id=last_id)
+                        else:
+                            msgs_call = self.client.get_messages(cid, limit=10)
+
                         if inspect.isawaitable(msgs_call):
-                            await asyncio.wait_for(msgs_call, timeout=3.0)
-                    except Exception:
-                        pass
-                    # Gentle stagger between group queries
-                    await asyncio.sleep(0.4)
+                            msgs = await asyncio.wait_for(msgs_call, timeout=5.0)
+                        else:
+                            msgs = msgs_call
+
+                        if msgs:
+                            new_max_id = max(getattr(m, "id", 0) for m in msgs)
+                            if new_max_id > self._last_seen_msg_ids.get(cid, 0):
+                                self._last_seen_msg_ids[cid] = new_max_id
+
+                            # Process in chronological order (oldest to newest)
+                            for msg in reversed(msgs):
+                                asyncio.create_task(self._process_event(msg, cid))
+
+                    except FloodWaitError as e:
+                        logger.warning(f"Telegram FloodWait in harvester active poller: sleeping {e.seconds}s")
+                        await asyncio.sleep(e.seconds)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.debug(f"Harvester active poller transient error for {cid}: {e}")
+
+                    # 1.0 second gentle stagger between group queries
+                    await asyncio.sleep(1.0)
+
+                # Rest for the remainder of the 60-second cycle
+                elapsed = time.time() - sweep_start
+                sleep_remainder = max(5.0, 60.0 - elapsed)
+                await asyncio.sleep(sleep_remainder)
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.debug(f"Harvester channel pulse exception: {e}")
+                logger.error(f"Unexpected error in harvester active poller loop: {e}", exc_info=True)
+                await asyncio.sleep(5)
 
     def setup_event_handlers(self):
         """Attaches Telethon events.NewMessage handler to the client."""
@@ -373,18 +412,18 @@ class HarvesterListener:
             asyncio.create_task(self._process_event(event, chat_id))
 
     async def start(self):
-        """Starts the harvester listener, stats flush loop, and channel pulse loop."""
+        """Starts the harvester listener, stats flush loop, and hybrid active poller loop."""
         self._is_running = True
         await self.reload_monitored_groups()
         self.setup_event_handlers()
         if self._flush_task is None or self._flush_task.done():
             self._flush_task = asyncio.create_task(self._flush_loop())
         if self._pulse_task is None or self._pulse_task.done():
-            self._pulse_task = asyncio.create_task(self._channel_pulse_loop())
+            self._pulse_task = asyncio.create_task(self._active_poller_loop())
         logger.info("HarvesterListener started successfully.")
 
     async def stop(self):
-        """Stops the harvester listener, pulse loop, and flushes pending telemetry."""
+        """Stops the harvester listener, active poller loop, and flushes pending telemetry."""
         self._is_running = False
         if self._flush_task and not self._flush_task.done():
             self._flush_task.cancel()

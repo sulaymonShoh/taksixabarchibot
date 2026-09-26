@@ -11,6 +11,7 @@ import os
 import sys
 import asyncio
 import time
+import contextlib
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
@@ -205,7 +206,58 @@ async def run_phase2_async_tests():
     await listener._process_event(fresh_event, -1002222222222)
     assert len(dispatched_orders) == 4, "Fresh order should have been dispatched!"
     assert dispatched_orders[-1]["transit_lag_seconds"] >= 25.0
-    print("   [PASS] 30-second-fresh message ingested and transit lag recorded.")
+    # ==================== 5. HYBRID ACTIVE POLLER ====================
+    print("\n>>> 5. Testing Hybrid Active Poller Execution...")
+    mock_client = MagicMock()
+    mock_client.is_connected.return_value = True
+
+    poller_dispatches = []
+    async def mock_poller_dispatch(order):
+        poller_dispatches.append(order)
+
+    poller_listener = HarvesterListener(
+        client=mock_client,
+        parser=OrderParser(),
+        deduplicator=Deduplicator(default_ttl_seconds=900),
+        on_order_callback=mock_poller_dispatch
+    )
+    poller_listener._monitored_chat_ids = [-100999888777]
+    poller_listener._monitored_groups_cache[-100999888777] = {
+        "group_id": -100999888777,
+        "title": "Namangan Toshkent Express",
+        "username": "namangantaxi"
+    }
+
+    # Prepare mock message returned by client.get_messages
+    polled_msg = MagicMock()
+    polled_msg.id = 7001
+    polled_msg.raw_text = "Namangandan Toshkentga 3 kishi bor shoshilinch tel: 93 111 22 33"
+    polled_msg.date = datetime.now(timezone.utc) - timedelta(seconds=15)
+    polled_msg.sender_id = 123456
+    polled_msg.chat = MagicMock()
+    polled_msg.chat.title = "Namangan Toshkent Express"
+    polled_msg.chat.username = "namangantaxi"
+
+    async def mock_get_messages(cid, limit=20, min_id=None):
+        return [polled_msg]
+
+    mock_client.get_messages.side_effect = mock_get_messages
+
+    # Run one single iteration of the poller sweep
+    poller_listener._is_running = True
+    poller_task = asyncio.create_task(poller_listener._active_poller_loop())
+
+    # Let the poller loop execute the first sweep
+    await asyncio.sleep(1.5)
+    poller_listener._is_running = False
+    poller_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await poller_task
+
+    assert len(poller_dispatches) == 1, "Polled order should have been captured and dispatched!"
+    assert poller_dispatches[0]["order_type"] == "PASSENGER"
+    assert poller_listener._last_seen_msg_ids.get(-100999888777) == 7001
+    print("   [PASS] Poller fetched message, updated last_seen_msg_id, and dispatched order.")
 
     # Clean up test database
     if os.path.exists("data/test_v3_harvester.db"):
