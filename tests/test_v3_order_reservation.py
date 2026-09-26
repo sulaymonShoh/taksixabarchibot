@@ -334,16 +334,17 @@ async def run_tests():
     await claim_order_call(dm_vip_call)
 
     # Check that driver 201 received private DM confirmation
-    dm_msgs = [m for (cid, mid), m in mock_bot.messages.items() if cid == 201 and "SIZ BUYURTMANI BAND QILDINGIZ" in m.text]
+    dm_msgs = [m for (cid, mid), m in mock_bot.messages.items() if cid == 201 and "Siz buyurtmani qabul qildingiz" in m.text]
     assert len(dm_msgs) >= 1
     winner_dm = dm_msgs[-1]
 
     # 1. Human-friendly route name (no raw _all or underscores)
-    assert "Toshkent shahri ➡️ Andijon shahar" in winner_dm.text
+    assert "Toshkent shahri -> Andijon shahar" in winner_dm.text
     # 2. Phone says Ko'rsatilmagan
-    assert "Ko'rsatilmagan" in winner_dm.text
-    # 3. Profile / Lichka link is present and clickable
-    assert "Lichka / Profil:" in winner_dm.text
+    assert "Telefon: Ko'rsatilmagan" in winner_dm.text
+    # 3. Profile / Lichka link is present with Yozish
+    assert "Lichka: <a href=" in winner_dm.text
+    assert "Yozish</a>" in winner_dm.text
     assert "https://t.me/test_passenger" in winner_dm.text
     # 4. Buttons include Lichkaga yozish and Asl xabarni ko'rish
     dm_btns = [b for row in winner_dm.reply_markup.inline_keyboard for b in row]

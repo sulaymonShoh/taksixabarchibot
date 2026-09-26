@@ -2553,28 +2553,26 @@ async def claim_order_call(call: CallbackQuery):
             if m_msg:
                 message_link = m_msg.group(1)
 
-        # Profile link display
+        # Profile link display (exact text: "Yozish" with link)
         if telegram_username:
             clean_u = telegram_username.replace("@", "")
-            profile_link = f"<a href=\"https://t.me/{clean_u}\">{telegram_username}</a>"
             author_url = f"https://t.me/{clean_u}"
+            profile_link = f"<a href=\"{author_url}\">Yozish</a>"
         elif sender_id:
-            profile_link = f"<a href=\"tg://user?id={sender_id}\">Mijoz profiliga o'tish</a>"
             author_url = f"tg://user?id={sender_id}"
+            profile_link = f"<a href=\"{author_url}\">Yozish</a>"
         elif message_link:
-            profile_link = f"<a href=\"{message_link}\">Guruhdagi xabar orqali bog'lanish</a>"
             author_url = message_link
+            profile_link = f"<a href=\"{author_url}\">Yozish</a>"
         else:
-            profile_link = "<i>Ko'rsatilmagan</i>"
+            profile_link = "Ko'rsatilmagan"
             author_url = None
 
         dm_text = (
-            "🎉 <b>SIZ BUYURTMANI BAND QILDINGIZ!</b>\n\n"
-            f"📍 <b>Yo'nalish:</b> {orig_name} ➡️ {dest_name}\n"
-            f"📞 <b>Telefon:</b> <code>{phone_display}</code>\n"
-            f"💬 <b>Lichka / Profil:</b> {profile_link}\n"
-            f"📝 <b>Mijoz xabari:</b>\n<i>{raw_text}</i>\n\n"
-            "<i>Mijoz bilan zudlik bilan bog'laning. Oq yo'l!</i>"
+            "<b>Siz buyurtmani qabul qildingiz</b>\n\n"
+            f"Yo'nalish: {orig_name} -> {dest_name}\n"
+            f"Telefon: {phone_display}\n"
+            f"Lichka: {profile_link}"
         )
 
         dm_buttons = []
