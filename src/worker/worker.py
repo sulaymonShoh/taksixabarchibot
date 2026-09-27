@@ -12,6 +12,7 @@ from telethon.errors import (
 from aiogram import Bot
 from src import database as db
 from src.bot import keyboards as kb
+from src.worker.spintax import parse_spintax
 from src.logger import setup_logger
 
 logger = setup_logger("worker")
@@ -56,8 +57,17 @@ class UserBroadcastWorker:
         try:
             # Forward message from source chat
             if drop_author:
-                # Copy / Send exact message without 'Forwarded from' header
-                await self.client.send_message(chat_id, message_to_forward)
+                # Copy / Send message without 'Forwarded from' header, parsing Spintax if present
+                raw_text = getattr(message_to_forward, "text", None) or getattr(message_to_forward, "raw_text", None) or ""
+                if raw_text and "{" in raw_text and "}" in raw_text:
+                    spun_text = parse_spintax(raw_text)
+                    media = getattr(message_to_forward, "media", None)
+                    if media:
+                        await self.client.send_message(chat_id, spun_text, file=media)
+                    else:
+                        await self.client.send_message(chat_id, spun_text)
+                else:
+                    await self.client.send_message(chat_id, message_to_forward)
             else:
                 # Standard native forward
                 await self.client.forward_messages(chat_id, message_to_forward.id, source_chat_id)

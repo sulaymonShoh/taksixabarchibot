@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -69,6 +69,16 @@ async def test_worker_formatting_and_errors():
     await worker.process_group(group, -100999, mock_msg, drop_author=True)
     mock_client.send_message.assert_called_with(-100123, mock_msg)
     print("   [PASS] Clean copy forward verified.")
+
+    # 1.3b Test Spintax parsing with drop_author=True
+    spintax_msg = MagicMock()
+    spintax_msg.text = "{Variant A|Variant B} test"
+    spintax_msg.media = None
+    await worker.process_group(group, -100999, spintax_msg, drop_author=True)
+    called_args = mock_client.send_message.call_args[0]
+    assert called_args[0] == -100123
+    assert called_args[1] in ("Variant A test", "Variant B test")
+    print("   [PASS] Spintax authorless forward verified.")
 
     # 1.4 Test SlowModeWaitError handling
     mock_client.forward_messages.side_effect = SlowModeWaitError(request=None)
