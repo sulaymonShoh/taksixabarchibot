@@ -2,6 +2,7 @@ import asyncio
 import random
 from datetime import datetime
 from telethon import TelegramClient
+from telethon.tl.types import MessageMediaWebPage, MessageMediaEmpty
 from telethon.errors import (
     FloodWaitError,
     SlowModeWaitError,
@@ -62,7 +63,9 @@ class UserBroadcastWorker:
                 if raw_text and "{" in raw_text and "}" in raw_text:
                     spun_text = parse_spintax(raw_text)
                     media = getattr(message_to_forward, "media", None)
-                    if media:
+                    # Webpage link previews and empty media are not files
+                    has_file = media and not isinstance(media, (MessageMediaWebPage, MessageMediaEmpty))
+                    if has_file:
                         await self.client.send_message(chat_id, spun_text, file=media)
                     else:
                         await self.client.send_message(chat_id, spun_text)

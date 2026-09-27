@@ -80,6 +80,18 @@ async def test_worker_formatting_and_errors():
     assert called_args[1] in ("Variant A test", "Variant B test")
     print("   [PASS] Spintax authorless forward verified.")
 
+    # 1.3c Test Spintax with MessageMediaWebPage (should NOT pass as file)
+    from telethon.tl.types import MessageMediaWebPage
+    webpage_msg = MagicMock()
+    webpage_msg.text = "{Variant A|Variant B} with link"
+    webpage_msg.media = MessageMediaWebPage(webpage=None)
+    await worker.process_group(group, -100999, webpage_msg, drop_author=True)
+    called_args = mock_client.send_message.call_args[0]
+    called_kwargs = mock_client.send_message.call_args[1]
+    assert called_args[0] == -100123
+    assert "file" not in called_kwargs
+    print("   [PASS] Spintax with MessageMediaWebPage verified (no file error).")
+
     # 1.4 Test SlowModeWaitError handling
     mock_client.forward_messages.side_effect = SlowModeWaitError(request=None)
     mock_client.forward_messages.side_effect.seconds = 30
