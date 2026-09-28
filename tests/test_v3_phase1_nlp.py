@@ -158,7 +158,12 @@ def run_phase1_tests():
         "ТОШКЕНТГА     9:00  10:00  ДА     ЮУРАМИЗ     2  ТА    ОДАМ   ПОЧТА   БОЛСА   ОЛМИЗ  ТОМБАГАЖ   БОР   АЙОЛАР  БОР     ОЛДИ  МЕСТА    БОШ    АВТО    КОБОЛТ  ❄️❄️❄️❄️🛜🛜🛜  ТЕЛ    999043330    943853330   ОЛДИНДАН   РАХМАТ",
         "Toshkentga 9:00 - 10:00 da yuramiz. 2 ta odam, pochta bo'lsa olamiz. Tom bagaji bor. Ayol yo'lovchilar bor. Oldi o'rindiq bo'sh. Avtomobil - Cobalt. Telefon: 999043330, 943853330. Oldindan rahmat.",
         "Эрталаб. тошкенга харакатамиз  андижон хожаобод достлик таможнидан тошкенга одам почта болса олиб кэтамиз \n974853434",
-        "anjondan toshknga siroshni ketamz. oldi mestamiz bosh poshtala ovolamz 999999999"
+        "anjondan toshknga siroshni ketamz. oldi mestamiz bosh poshtala ovolamz 999999999",
+        # Reported false positives batch (Tracker 2, glued phone, olib yuramiz, tuldik)
+        "Коргонтепа \nЖалакудук \nДостлик таможный \nХожаобод \nАндижон дан >>>>\nТошкенга юрамиз \n\nМашина Трекер 2 \nКанфорт одам почта \nБолса тел: +998944808294",
+        "Toshkent shaxar ichidamiz asaka marhamatga odam pochta olamiz990000000",
+        "тошкендан андижон хужабод дустлик б боши найман ш булок уч тепа кулла томонга 2 та одам ва пошталар олиб юрамиз соат 08 0 9 [Band qilingan]",
+        "Андижон Хужаобод Булокбоши дустлик таможни дан Тошкенга 11-00 га худохохласа тулдик зарур почталар булса оламиз503072341"
     ]
 
     for ad in driver_ads:

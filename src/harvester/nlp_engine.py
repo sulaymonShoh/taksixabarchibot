@@ -51,7 +51,10 @@ class OrderParser:
             t = re.sub(r'(?<=\b\w) (?=\w\b)', '', t)
         # 3. Normalize apostrophes and quotes
         t = t.replace("‘", "'").replace("’", "'").replace("`", "'").replace("ʻ", "'")
-        # 4. Clean excessive whitespace
+        # 4. Separate glued letters and phone numbers (e.g. "olamiz990000000" -> "olamiz 990000000")
+        t = re.sub(r"([a-zA-Z\u0400-\u04FF\']+)(\d{7,})", r"\1 \2", t)
+        t = re.sub(r"(\d{7,})([a-zA-Z\u0400-\u04FF\']+)", r"\1 \2", t)
+        # 5. Clean excessive whitespace
         return " ".join(t.split())
 
     def is_driver_ad(self, norm_text: str) -> bool:
