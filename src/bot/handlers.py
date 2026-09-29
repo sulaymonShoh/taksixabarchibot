@@ -582,14 +582,14 @@ async def process_phone_input(message: Message, state: FSMContext):
     code_prompt = (
         f"📩 <b>{t('Tasdiqlash kodi yuborildi!', user_script)}</b>\n\n"
         f"{t('Telefon raqamingiz', user_script)} (<code>{clean_phone}</code>) {t('ga Telegram ilovasi orqali 5 xonali tasdiqlash kodi yuborildi.', user_script)}\n\n"
-        f"👉 <b>{t('Kodni probellar bilan ajratib yozib yuboring:', user_script)}</b>\n"
-        f"{t('Masalan:', user_script)} <code>1 2 3 4 5</code>"
+        f"👉 <b>{t('Telegramdan kelgan 5 xonali kodni kiriting:', user_script)}</b>"
     )
     await message.answer(code_prompt, reply_markup=kb.cancel_auth_kb(), parse_mode="HTML")
 
 @router.message(AuthStates.waiting_for_code, F.text)
 async def process_code_input(message: Message, state: FSMContext, bot: Bot):
     user_id = message.from_user.id
+    user_script = await db.get_user_script(user_id)
     raw_code = message.text.strip()
     
     status_msg = await message.answer("⏳ Kod tekshirilmoqda...")
@@ -597,7 +597,7 @@ async def process_code_input(message: Message, state: FSMContext, bot: Bot):
     
     if not res.get("success"):
         await status_msg.edit_text(
-            f"❌ **Xatolik:** {res.get('error')}\n\nIltimos, kodni probellar bilan qayta kiriting (Masalan: `1 2 3 4 5`):",
+            f"❌ **Xatolik:** {res.get('error')}\n\n{t('Iltimos, Telegramdan kelgan 5 xonali kodni qayta kiriting:', user_script)}",
             reply_markup=kb.cancel_auth_kb(),
             parse_mode="Markdown"
         )
