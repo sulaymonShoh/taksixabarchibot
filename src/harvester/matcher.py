@@ -231,37 +231,43 @@ class CorridorMatcher:
         order_type = order.get("order_type", "PASSENGER")
         if script == "cyr":
             header = "📦 Почта" if order_type == "CARGO" else "👤 Йўловчи"
+            mijoz_xabari_label = "Мижоз хабари:"
             lichka_label = "Личка"
             tel_label = "Тел"
             asl_link_text = "Асл хабарни"
             korish_word = "кўриш"
             yozish_word = "Ёзиш"
+            faqat_asl_note = "Фақат асл хабар орқали алоқага чиқиш мумкин"
         else:
             header = "📦 Pochta" if order_type == "CARGO" else "👤 Yo'lovchi"
+            mijoz_xabari_label = "Mijoz xabari:"
             lichka_label = "Lichka"
             tel_label = "Tel"
             asl_link_text = "Asl xabarni"
             korish_word = "ko'rish"
             yozish_word = "Yozish"
+            faqat_asl_note = "Faqat asl xabar orqali aloqaga chiqish mumkin"
 
         raw_text = html.escape(order.get("raw_text", "").strip())
         username = order.get("telegram_username")
-        sender_id = order.get("sender_id")
         phone = order.get("phone_number")
         message_link = order.get("message_link")
 
         lines = [
             f"<b>{header}</b>",
             "",
-            raw_text,
+            f"<b>{mijoz_xabari_label}</b>",
+            f"<blockquote>{raw_text}</blockquote>",
         ]
 
         contacts = []
         if username and not username.lstrip("@").isdigit():
             clean_user = username.replace("@", "").strip()
             contacts.append(f'{lichka_label}: <a href="https://t.me/{clean_user}">@{clean_user}</a>')
-        elif sender_id:
-            contacts.append(f'{lichka_label}: <a href="tg://user?id={sender_id}">{yozish_word}</a>')
+        elif message_link:
+            contacts.append(f'{lichka_label}: <a href="{message_link}">{yozish_word}</a> ({faqat_asl_note})')
+        else:
+            contacts.append(f'{lichka_label}: {faqat_asl_note}')
 
         if phone:
             contacts.append(f"{tel_label}: {phone}")

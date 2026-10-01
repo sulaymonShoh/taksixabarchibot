@@ -2506,7 +2506,7 @@ async def claim_order_call(call: CallbackQuery):
             if is_group:
                 # Mask phone numbers and contact handles in the group card once claimed
                 masked_group_text = re.sub(r"Tel:\s*\+?[\d\s\-]+", "Tel: 🔒 [Band qilindi — berkitildi]", current_text)
-                masked_group_text = re.sub(r"Lichka:\s*<a[^>]*>.*?</a>", "Lichka: 🔒 [Berkitildi]", masked_group_text)
+                masked_group_text = re.sub(r"Lichka:.*", "Lichka: 🔒 [Berkitildi]", masked_group_text)
                 masked_group_text = re.sub(r"(\+?998[\s\-]?)?\d{2}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}", "••••••", masked_group_text)
 
                 claimed_banner = f"\n\n<b>✅ BAND QILINDI!</b>\n<i>Haydovchi: <a href=\"tg://user?id={user_id}\">{claimer_name}</a></i>"
@@ -2553,20 +2553,20 @@ async def claim_order_call(call: CallbackQuery):
             if m_msg:
                 message_link = m_msg.group(1)
 
-        # Profile link display (exact text: "Yozish" with link)
+        # Profile link display
         if telegram_username:
             clean_u = telegram_username.replace("@", "")
             author_url = f"https://t.me/{clean_u}"
-            profile_link = f"<a href=\"{author_url}\">Yozish</a>"
-        elif sender_id:
-            author_url = f"tg://user?id={sender_id}"
-            profile_link = f"<a href=\"{author_url}\">Yozish</a>"
+            profile_link = f"<a href=\"{author_url}\">Yozish</a> (@{clean_u})"
+            btn_title = "💬 Lichkaga yozish"
         elif message_link:
             author_url = message_link
-            profile_link = f"<a href=\"{author_url}\">Yozish</a>"
+            profile_link = f"<a href=\"{author_url}\">Yozish</a> (Faqat asl xabar orqali aloqaga chiqish mumkin)"
+            btn_title = "💬 Guruhda yozish"
         else:
-            profile_link = "Ko'rsatilmagan"
+            profile_link = "Ko'rsatilmagan (Faqat asl xabar orqali aloqaga chiqish mumkin)"
             author_url = None
+            btn_title = None
 
         safe_raw_text = html.escape(raw_text)
         dm_text = (
@@ -2575,14 +2575,14 @@ async def claim_order_call(call: CallbackQuery):
             f"Telefon: {phone_display}\n"
             f"Lichka: {profile_link}\n\n"
             "Mijoz xabari:\n"
-            f"<i>{safe_raw_text}</i>\n\n"
+            f"<blockquote>{safe_raw_text}</blockquote>\n\n"
             "Oq yo'l!"
         )
 
         dm_buttons = []
         action_row = []
-        if author_url:
-            action_row.append(InlineKeyboardButton(text="💬 Lichkaga yozish", url=author_url))
+        if author_url and btn_title:
+            action_row.append(InlineKeyboardButton(text=btn_title, url=author_url))
         if phone and phone != "Ko'rsatilmagan":
             clean_tel = re.sub(r"[^\d+]", "", phone)
             action_row.append(InlineKeyboardButton(text="📞 Qo'ng'iroq", url=f"tel:{clean_tel}"))

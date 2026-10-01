@@ -103,11 +103,11 @@ def test_raw_order_text_untouched_in_radar():
         "message_link": "https://t.me/c/999/89"
     }
     notif_id_lat = matcher.default_matcher.format_notification(order_no_user, match_meta, script="lat")
-    assert '<a href="tg://user?id=777666555">Yozish</a>' in notif_id_lat
+    assert '<a href="https://t.me/c/999/89">Yozish</a> (Faqat asl xabar orqali aloqaga chiqish mumkin)' in notif_id_lat
     assert ">777666555<" not in notif_id_lat  # ID is never shown directly as text
 
     notif_id_cyr = matcher.default_matcher.format_notification(order_no_user, match_meta, script="cyr")
-    assert '<a href="tg://user?id=777666555">Ёзиш</a>' in notif_id_cyr
+    assert '<a href="https://t.me/c/999/89">Ёзиш</a> (Фақат асл хабар орқали алоқага чиқиш мумкин)' in notif_id_cyr
     assert ">777666555<" not in notif_id_cyr
 
 def test_keyboards_script_and_separation():

@@ -358,6 +358,7 @@ async def run_tests():
     print("\n" + "=" * 70)
     print("ALL REAL-TIME ORDER RESERVATION & SYNC TESTS PASSED (100% SUCCESS)!")
     print("=" * 70)
+    await asyncio.sleep(0.3)
 
 if __name__ == "__main__":
     asyncio.run(run_tests())
